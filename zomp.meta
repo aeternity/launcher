@@ -1,0 +1,17 @@
+{a_email,"zxq9@zxq9.com"}.
+{author,"Craig Everett"}.
+{c_email,"zxq9@zxq9.com"}.
+{copyright,"Craig Everett"}.
+{deps,[{"otpr","zxwidgets",{1,0,1}},{"otpr","zj",{1,0,6}}]}.
+{desc,"A GUI meta-application to run and monitor a local Aeternity node."}.
+{file_exts,[]}.
+{key_name,none}.
+{license,"ISC"}.
+{modules,[]}.
+{name,"Aeternity Launcher"}.
+{package_id,{"otpr","ael",{0,1,0}}}.
+{prefix,"ael"}.
+{repo_url,"https://github.com/aeternity/launcher"}.
+{tags,["aeternity","bitcoin","cryptocurrency","crypto","contract","ae"]}.
+{type,gui}.
+{ws_url,[]}.
