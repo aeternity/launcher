@@ -16,7 +16,7 @@
 -behaviour(supervisor).
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
--license("MIT").
+-license("ISC").
 
 -export([start_link/0]).
 -export([init/1]).

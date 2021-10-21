@@ -7,7 +7,7 @@
 -behavior(application).
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
--license("MIT").
+-license("ISC").
 
 -export([start/2, stop/1]).
 
