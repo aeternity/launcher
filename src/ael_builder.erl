@@ -16,8 +16,8 @@
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
 
--define(tag, "v6.2.0").
--define(ver, "6.2.0").
+-define(tag, "v6.3.0").
+-define(ver, "6.3.0").
 
 -export([start_link/1]).
 -include("$zx_include/zx_logger.hrl").
@@ -45,8 +45,10 @@ init(BuildMeta) ->
     check_git(Git, ERTS, BuildMeta).
 
 check_git(Git, ERTS, {?ver, ERTS}) ->
-    ok = file:set_cwd(Git),
-    check_build(Git, ERTS);
+    case file:set_cwd(Git) of
+        ok              -> check_build(Git, ERTS);
+        {error, enoent} -> clone_repo(Git, ERTS)
+    end;
 check_git(Git, ERTS, {AEVer, OldERTS}) ->
     Format = "Built: AE ~s with ERTS ~s. Rebuilding as AE ~s with ERTS ~s.~n",
     Message = io_lib:format(Format, [AEVer, OldERTS, ?ver, ERTS]),
@@ -59,7 +61,7 @@ check_git(Git, ERTS, none) ->
     clone_repo(Git, ERTS).
 
 clone_repo(Git, ERTS) ->
-    ok = zx_lib:rm_rf(Git),
+    "" = os:cmd("rm -rf repo"),
     ok = ael_gui:ask_install(),
     Command = "git clone https://github.com/aeternity/aeternity.git repo",
     ok = ael_gui:show("Fetching code...\n"),
@@ -92,15 +94,23 @@ check_build(Git, ERTS) ->
         {error, enoent} ->
             ok = ael_gui:show("Building Aeternity node...\n"),
             ok = external(Git, "make prod-build"),
-            ok = copy_silly_files(BaseDir),
-            ok = run_once_out_of_context(BaseDir),
-            ok = move_delicious_data_bits(BaseDir),
+            ok = maybe_move_files(BaseDir),
             check_build(Git, ERTS);
         WeirdPoo ->
             ok = ael_gui:show("Received weird poo:"),
             StringyPoo = io_lib:format("~tp", [WeirdPoo]),
             ok = ael_gui:show(StringyPoo),
             {error, mismatch, WeirdPoo}
+    end.
+
+maybe_move_files(BaseDir) ->
+    case filelib:is_dir(filename:join(BaseDir, "data")) of
+        true ->
+            ok;
+        false ->
+            ok = copy_silly_files(BaseDir),
+            ok = run_once_out_of_context(BaseDir),
+            ok = move_delicious_data_bits(BaseDir)
     end.
 
 copy_silly_files(BaseDir) ->
