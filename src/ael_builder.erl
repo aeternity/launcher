@@ -8,6 +8,16 @@
 %%%     build error encountered and point to the error log output)
 %%%  3. Execute whatever build step is required next.
 %%%  4. Clean and retry a build if a partial build continuation fails.
+%%%
+%%% TODO:
+%%% The build task should be made independent of the environment setting/wiping
+%%% and loading tasks. The reason for this is to enable starting, stopping and
+%%% re-starting the node in a variety of configurations, modes and chains.
+%%% Future task definitions:
+%%% 1. Check build / build
+%%% 2. Environment wipe and code unload
+%%% 3. Environment setup and code loading based on given config and mode
+%%% NOTE: Tasks 2 and 3 should eventually become the responsibility of app_ctrl
 %%% @end
 
 -module(ael_builder).
@@ -38,7 +48,7 @@ init(BuildMeta) ->
         "OTP R~s (v~s)~n",
     String = io_lib:format(Format, [OS, Version, OTP, ERTS]),
     ok = ael_gui:show(String),
-    Var = zx_daemon:dir(var),
+    Var = ael_con:var(),
     Git = filename:join(Var, "repo"),
     ok = filelib:ensure_dir(Git),
     ok = file:set_cwd(Var),
@@ -67,30 +77,35 @@ clone_repo(Git, ERTS) ->
     ok = ael_gui:show("Fetching code...\n"),
     ok = external(Command),
     ok = file:set_cwd(Git),
-    ok = external("git checkout " ++ ?tag),
+%   ok = external("git checkout " ++ ?tag),
+    ok = external("git checkout gh3786-add-app_ctrl-dep"),
     check_build(Git, ERTS).
 
 check_build(Git, ERTS) ->
     BaseDir = filename:join(Git, "_build/prod/rel/aeternity"),
     RELEASES = filename:join(BaseDir, "releases/RELEASES"),
     case file:consult(RELEASES) of
-        {ok, [[{release, "aeternity", ?ver, ERTS, Deps, permanent}]]} ->
-            ok = ael_gui:show("Build successful!\n"),
+        {ok, [[{release, "aeternity", BuildVer, BuildERTS, Deps, permanent}]]} ->
+            Message = io_lib:format("Build successful with BuildVer: ~p BuildERTS: ~p!\n", [BuildVer, BuildERTS]),
+            ok = ael_gui:show(Message),
             add_libs(?ver, ERTS, BaseDir, Deps);
-        {ok, [[{release, "aeternity", ?ver, BadERTS, _, permanent}]]} ->
-            Format = "Erlang version mismatch: ~s VS ~s~n",
-            Message = io_lib:format(Format, [BadERTS, ERTS]),
-            ok = ael_gui:show(Message),
-            ok = ael_gui:show("Running `make clean` and rebilding...\n"),
-            ok = external(Git, "make clean"),
-            check_build(Git, ERTS);
-        {ok, [[{release, "aeternity", OhNoVer, ERTS, _, permanent}]]} ->
-            Format = "Aeternity version mismatch: ~p VS ~p~n",
-            Message = io_lib:format(Format, [OhNoVer, ?ver]),
-            ok = ael_gui:show(Message),
-            ok = ael_gui:show("Running a make clean and rebild...\n"),
-            ok = external(Git, "make clean"),
-            check_build(Git, ERTS);
+%       {ok, [[{release, "aeternity", ?ver, ERTS, Deps, permanent}]]} ->
+%           ok = ael_gui:show("Build successful!\n"),
+%           add_libs(?ver, ERTS, BaseDir, Deps);
+%       {ok, [[{release, "aeternity", ?ver, BadERTS, _, permanent}]]} ->
+%           Format = "Erlang version mismatch: ~s VS ~s~n",
+%           Message = io_lib:format(Format, [BadERTS, ERTS]),
+%           ok = ael_gui:show(Message),
+%           ok = ael_gui:show("Running `make clean` and rebilding...\n"),
+%           ok = external(Git, "make clean"),
+%           check_build(Git, ERTS);
+%       {ok, [[{release, "aeternity", OhNoVer, ERTS, _, permanent}]]} ->
+%           Format = "Aeternity version mismatch: ~p VS ~p~n",
+%           Message = io_lib:format(Format, [OhNoVer, ?ver]),
+%           ok = ael_gui:show(Message),
+%           ok = ael_gui:show("Running a make clean and rebild...\n"),
+%           ok = external(Git, "make clean"),
+%           check_build(Git, ERTS);
         {error, enoent} ->
             ok = ael_gui:show("Building Aeternity node...\n"),
             ok = external(Git, "make prod-build"),
@@ -104,10 +119,11 @@ check_build(Git, ERTS) ->
     end.
 
 maybe_move_files(BaseDir) ->
-    case filelib:is_dir(filename:join(BaseDir, "data")) of
+    case filelib:is_file(filename:join(ael_con:var(), "data")) of
         true ->
-            ok;
+            ok = ael_gui:show("No need to move files to data/\n");
         false ->
+            ok = ael_gui:show("Populating data/\n"),
             ok = copy_silly_files(BaseDir),
             ok = run_once_out_of_context(BaseDir),
             ok = move_delicious_data_bits(BaseDir)
@@ -163,6 +179,9 @@ add_libs(AEVer, ERTS, BaseDir, Deps) ->
     load_apps(AEVer, ERTS, Paths).
 
 load_apps(AEVer, ERTS, Paths) ->
+    {ok, [Config]} = file:consult(filename:join(zx:get_home(), "priv/sys.config")),
+    ok = application:set_env(Config),
+    {ok, _} = net_kernel:start(['aeternity@localhost', longnames]),
     Loaded = [element(1, A) || A <- application:loaded_applications()],
     Load =
         fun(Path) ->
@@ -180,12 +199,6 @@ load_apps(AEVer, ERTS, Paths) ->
             ael_gui:show(Message)
         end,
     ok = lists:foreach(Load, Paths),
-    set_env(AEVer, ERTS).
-
-set_env(AEVer, ERTS) ->
-    {ok, [Config]} = file:consult(filename:join(zx:get_home(), "priv/sys.config")),
-    ok = application:set_env(Config),
-    {ok, _} = net_kernel:start(['aeternity@localhost', longnames]),
     ael_con:build_complete(AEVer, ERTS).
 
 external(Dir, Command) ->

@@ -85,6 +85,7 @@ init(BuildMeta) ->
     MainSz = wxBoxSizer:new(?wxVERTICAL),
     ButtSz = wxBoxSizer:new(?wxHORIZONTAL),
     StatSz = wxBoxSizer:new(?wxVERTICAL),
+    GraphSz = wxBoxSizer:new(?wxVERTICAL),
 
     ConfBn = wxButton:new(Frame, ?CONF, [{label, "Configuration"}]),
     _ = wxButton:disable(ConfBn),
@@ -123,26 +124,12 @@ init(BuildMeta) ->
     _ = wxBoxSizer:add(StatSz,  BlockSz,  [{flag, ?wxEXPAND}, {proportion, 0}]),
     _ = wxBoxSizer:add(StatSz,  WorkSz,   [{flag, ?wxEXPAND}, {proportion, 0}]),
 
-    
-    DiffGr = wxPanel:new(Frame),
+%   GraphWn = wxWindow:new(Frame, ?wxID_ANY),
+    DiffGr = ael_graph:new(Frame, GraphSz, "X", "Y"),
+%   _ = wxBoxSizer:add(GraphSz, GraphWn, [{flag, ?wxEXPAND}, {proportion, 1}]),
     PeerGr = wxPanel:new(Frame),
     PoolGr = wxPanel:new(Frame),
-    _ = wxWindow:setBackgroundStyle(DiffGr, ?wxBG_STYLE_PAINT),
-    F = wxSystemSettings:getFont(?wxSYS_DEFAULT_GUI_FONT),
-    Size = wxFont:getPointSize(F),
-    Fam = wxFont:getFamily(F),
-    NFont = wxFont:new(Size - 1, Fam, ?wxFONTSTYLE_NORMAL, ?wxFONTWEIGHT_BOLD),
-    SFont = wxFont:new(Size - 2, Fam, ?wxFONTSTYLE_NORMAL, ?wxFONTWEIGHT_NORMAL),
-    {R, G, B, _} = wxWindow:getBackgroundColour(DiffGr),
-    FontColor =
-        case ((R + G + B) div 3) > 100 of
-            false -> {0, 0, 0};
-            true  -> wxSystemSettings:getColour(?wxSYS_COLOUR_BTNTEXT)
-        end,
-    Pen = wxPen:new(wxSystemSettings:getColour(?wxSYS_COLOUR_HIGHLIGHT), [{width, 2}]),
-    ok = wxPanel:connect(DiffGr, paint, [callback]),
 
-    _ = wxBoxSizer:add(StatSz, DiffGr, [{flag, ?wxEXPAND}, {proportion, 0}]),
     _ = wxBoxSizer:add(StatSz, PeerGr, [{flag, ?wxEXPAND}, {proportion, 0}]),
     _ = wxBoxSizer:add(StatSz, PoolGr, [{flag, ?wxEXPAND}, {proportion, 0}]),
     
@@ -152,6 +139,7 @@ init(BuildMeta) ->
 
     _ = wxSizer:add(MainSz, ButtSz, zxw:flags(base)),
     _ = wxSizer:add(MainSz, StatSz, zxw:flags(base)),
+    _ = wxSizer:add(MainSz, GraphSz, zxw:flags(wide)),
     _ = wxSizer:add(MainSz, TextCt, zxw:flags(wide)),
     _ = wxFrame:setSizer(Frame, MainSz),
     ok = wxFrame:setSize(Frame, {700, 600}),
@@ -161,6 +149,7 @@ init(BuildMeta) ->
     ok = wxFrame:connect(Frame, command_button_clicked),
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
+    ok = ael_graph:show(DiffGr),
     BuildString =
         case BuildMeta of
             {AEVer, ERTSVer} ->
@@ -238,6 +227,9 @@ handle_info(Unexpected, State) ->
 %% The wx_object:handle_event/2 callback.
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
 
+handle_event(#wx{event = #wxPaint{}}, State = #s{diff_gr = DiffGr}) ->
+    ok = ael_graph:render(DiffGr),
+    {noreply, State};
 handle_event(#wx{id = ID, event = #wxCommand{type = command_button_clicked}}, State) ->
     NewState =
         case ID of
@@ -261,8 +253,8 @@ handle_event(Event, State) ->
          Error :: term().
 
 handle_sync_event(Event, Ref, State) ->
-    ok = tell(info, "Unexpected sync event ~tp (ref: ~tp) State: ~tp~n", [Event, Ref, State]),
-    ok.
+    Message = "Unexpected sync event ~tp (ref: ~tp) State: ~tp~n",
+    tell(info, Message, [Event, Ref, State]).
 
 
 code_change(_, State, _) ->
@@ -317,7 +309,7 @@ do_show(Terms, State = #s{text_ct = TextC}) ->
 
 
 do_stat({height, Now}, State = #s{sync = {true, Complete}, height_ct = HeightCt}) ->
-    Top = trunc((Now * 100) / Complete),
+    Top = calc_top(Now, Complete),
     Text = unicode:characters_to_list([integer_to_list(Now), "/", integer_to_list(Top)]),
     ok = wxTextCtrl:changeValue(HeightCt, Text),
     State#s{height = Now};
@@ -329,7 +321,7 @@ do_stat({difficulty, Rating}, State = #s{diff_ct = DiffCt}) ->
     State;
 do_stat({sync, Sync = {true, Complete}},
         State = #s{height = Now, height_ct = HeightCt, sync_ct = SyncCt}) ->
-    Top = trunc((Now * 100) / Complete),
+    Top = calc_top(Now, Complete),
     Text = unicode:characters_to_list([integer_to_list(Now), "/", integer_to_list(Top)]),
     ok = wxTextCtrl:changeValue(HeightCt, Text),
     SyncText = io_lib:format("~.2f%", [Complete]),
@@ -352,6 +344,11 @@ do_stat({peers, {PeerCount, PeerConnI, PeerConnO}}, State = #s{peer_ct = PeerCt}
 do_stat({txpool, Count}, State = #s{txpool_ct = TXPoolCt}) ->
     ok = wxTextCtrl:changeValue(TXPoolCt, integer_to_list(Count)),
     State.
+
+calc_top(Now, Complete) when Complete > 0 ->
+    trunc((Now * 100) / Complete);
+calc_top(_, _) ->
+    0.
 
 
 conf(State) ->

@@ -257,7 +257,9 @@ do_run_node(State) ->
 do_build_complete(BPID, AEVer, ERTSVer, State = #s{node = {building, BPID, _}}) ->
     Meta = {build, {AEVer, ERTSVer}},
     ok = zx_lib:write_terms(build_meta_path(), [Meta]),
-    {ok, _} = application:ensure_all_started(aecore),
+    {ok, Started} = application:ensure_all_started(app_ctrl),
+    ok = ael_gui:show(io_lib:format("Prestarted: ~p.~n", [Started])),
+    {ok, _} = application:ensure_all_started(aesync),
     ok = ael_monitor:start_poll(1000),
     State#s{node = stopped};
 do_build_complete(_, _, _, State) ->

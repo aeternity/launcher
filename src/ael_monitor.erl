@@ -125,10 +125,20 @@ do_poll(State = #s{interval = Interval}) ->
     TopBlockHeight = aec_blocks:height(TopBlock),
     {ok, TopKeyBlock} = aec_chain:top_key_block(),
     Difficulty = aec_blocks:difficulty(TopKeyBlock),
-    Sync = aec_sync:sync_progress(),
-    PeerCount = aec_peers:count(peers),
-    PeerConnI = aec_peers:count(inbound),
-    PeerConnO = aec_peers:count(outbound),
+    Sync =
+        case is_pid(whereis(aec_sync)) of
+            true  -> aec_sync:sync_progress();
+            false -> {true, 0.0}
+        end,
+    {PeerCount, PeerConnI, PeerConnO} =
+        case is_pid(whereis(aec_peers)) of
+            true ->
+                {aec_peers:count(peers),
+                 aec_peers:count(inbound),
+                 aec_peers:count(outbound)};
+            false ->
+                {0, 0, 0}
+        end,
     TXPoolSize = aec_tx_pool:size(),
     Update =
         [{height,     TopBlockHeight},
