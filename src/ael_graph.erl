@@ -15,7 +15,14 @@
 -license("ISC").
 -include_lib("wx/include/wx.hrl").
 -include_lib("wx/include/gl.hrl").
--export([new/4, new/5, show/1, update/2, updates/2, render/1, destroy/1]).
+-export([new/4, new/5, show/1,
+         get_wx_id/1,
+         update/2, updates/2, clear/1,
+         render/1,
+         traverse/3, rotate/3,
+         clear_t_pin/1,
+         clear_r_pin/1,
+         destroy/1]).
 -opaque([graph/0]).
 -include("$zx_include/zx_logger.hrl").
 
@@ -27,9 +34,22 @@
          label_x = ""   :: string(),
          label_y = ""   :: string(),
 %        history = []   :: [entry()]}).
-         history = history()   :: [entry()]}).
+         history = history()   :: [entry()],
+         min     = 0    :: number(),
+         max     = 0    :: number(),
+         tpin    = none :: none | pin(),
+         rpin    = none :: none | pin(),
+         tx      =  0.0 :: number(),
+         ty      = -1.0 :: number(),
+         rx      =  0.0 :: number(),
+         ry      =  0.0 :: number()}).
+
 
 -type graph() :: #g{}.
+-type pin()   :: {ClickX :: non_neg_integer(),
+                  ClickY :: non_neg_integer(),
+                  OrigX  :: non_neg_integer(),
+                  OrigY  :: non_neg_integer()}.
 -type entry() :: {erlang:timestamp(), number()}.
 
 
@@ -57,9 +77,13 @@ new(Parent, Sizer, LabelX, LabelY) ->
            ?WX_GL_SAMPLES,        4,
            0]}],
     Canvas = wxGLCanvas:new(Parent, CanvasAttributes),
-%   ok = wxGLCanvas:setSizer(Canvas, Sizer),
     _ = wxSizer:add(Sizer, Canvas, [{flag, ?wxEXPAND}, {proportion, 1}]),
     ok = wxGLCanvas:connect(Canvas, paint),
+    ok = wxGLCanvas:connect(Canvas, left_down),
+    ok = wxGLCanvas:connect(Canvas, left_up),
+    ok = wxGLCanvas:connect(Canvas, right_down),
+    ok = wxGLCanvas:connect(Canvas, right_up),
+    ok = wxGLCanvas:connect(Canvas, motion),
     GL =
         case erlang:system_info(otp_release) >= "24" of
             true  -> new;
@@ -94,6 +118,11 @@ show(Graph = #g{canvas = Canvas, gl = old}) ->
     ok = initialize(),
     render(Graph).
 
+-spec get_wx_id(graph()) -> integer().
+
+get_wx_id(#g{canvas = Canvas}) ->
+    wxWindow:getId(Canvas).
+
 initialize() ->
     ok = gl:enable(?GL_DEPTH_TEST),
     ok = gl:depthFunc(?GL_LESS),
@@ -108,7 +137,10 @@ initialize() ->
          Entry    :: entry(),
          NewGraph :: graph().
 
-update(Graph, _Entry) -> Graph.
+update(Graph, Entry) ->
+    NewGraph = add_entry(Graph, Entry),
+    ok = render(NewGraph),
+    NewGraph.
 
 
 -spec updates(Graph, Entries) -> NewGraph
@@ -116,7 +148,88 @@ update(Graph, _Entry) -> Graph.
          Entries  :: [entry()],
          NewGraph :: graph().
 
-updates(Graph, _Entries) -> Graph.
+updates(Graph, Entries) ->
+    NewGraph = lists:foldl(fun add_entry/2, Graph, lists:reverse(Entries)),
+    ok = render(NewGraph),
+    NewGraph.
+
+add_entry(Entry = {_, Value}, Graph = #g{history = History, min = Min, max = Max}) ->
+    NewMin = min(Min, Value),
+    NewMax = max(Max, Value),
+    Graph#g{history = [Entry | History], min = NewMin, max = NewMax}.
+
+
+-spec clear(Graph) -> NewGraph
+    when Graph    :: graph(),
+         NewGraph :: graph().
+
+clear(Graph) ->
+    NewGraph = Graph#g{history = [],
+                       min = 0, max = 0,
+                       tx = 0.0, ty = -1.0, rx = 0.0, ry = 0.0},
+    ok = render(NewGraph),
+    NewGraph.
+
+
+-spec traverse(X, Y, Graph) -> NewGraph
+    when Graph    :: graph(),
+         X        :: number(),
+         Y        :: number(),
+         NewGraph :: graph().
+
+traverse(X, Y, Graph) ->
+    NewGraph = tupdate(X, Y, Graph),
+    ok = render(NewGraph),
+    NewGraph.
+
+tupdate(X, Y, Graph = #g{tpin = none, tx = TX, ty = TY}) ->
+    TPIN = {X, Y, TX, TY},
+    Graph#g{tpin = TPIN};
+tupdate(X, Y, Graph = #g{tpin = {PX, PY, OrigX, OrigY}}) ->
+    TX = OrigX - ((PX - X) / 40),
+    TY = OrigY + ((PY - Y) / 40),
+    Graph#g{tx = TX, ty = TY}.
+
+
+
+-spec rotate(X, Y, Graph) -> NewGraph
+    when Graph    :: graph(),
+         X        :: number(),
+         Y        :: number(),
+         NewGraph :: graph().
+
+rotate(X, Y, Graph) ->
+    NewGraph = rupdate(X, Y, Graph),
+    ok = render(NewGraph),
+    NewGraph.
+
+rupdate(X, Y, Graph = #g{rpin = none, rx = RX, ry = RY}) ->
+    RPIN = {X, Y, RX, RY},
+    Graph#g{rpin = RPIN};
+rupdate(X, Y, Graph = #g{rpin = {PX, PY, OrigX, OrigY}}) ->
+    RX = OrigX + ((PX - X) / -2),
+    RY = OrigY + ((PY - Y) / -2),
+    Graph#g{rx = RX, ry = RY}.
+
+
+-spec clear_t_pin(Graph) -> NewGraph
+    when Graph    :: graph(),
+         NewGraph :: graph().
+
+clear_t_pin(Graph = #g{tpin = {_, _, _, _}}) ->
+    Graph#g{tpin = none};
+clear_t_pin(Graph) ->
+    Graph.
+
+
+-spec clear_r_pin(Graph) -> NewGraph
+    when Graph    :: graph(),
+         NewGraph :: graph().
+
+clear_r_pin(Graph = #g{rpin = {_, _, _, _}}) ->
+    Graph#g{rpin = none};
+clear_r_pin(Graph) ->
+    Graph.
 
 
 -spec render(Graph) -> ok
@@ -124,7 +237,8 @@ updates(Graph, _Entries) -> Graph.
 
 render(#g{gl = none}) ->
     ok;
-render(#g{sizer = Sizer, canvas = Canvas, history = History}) ->
+render(#g{sizer = Sizer, canvas = Canvas, history = History,
+          rx = RX, ry = RY, tx = TX, ty = TY}) ->
     ok = gl:clearColor(0.1, 0.1, 0.2, 1.0),
     ok = gl:color3f(1.0, 1.0, 1.0),
     {W, H} = wxSizer:getSize(Sizer),
@@ -136,11 +250,11 @@ render(#g{sizer = Sizer, canvas = Canvas, history = History}) ->
     ok = gl:matrixMode(?GL_MODELVIEW),
     ok = gl:loadIdentity(),
     ok = gl:clear(?GL_COLOR_BUFFER_BIT bor ?GL_DEPTH_BUFFER_BIT),
-%   ok = gl:translatef(TX, TY, -3.0),
-%   ok = gl:rotatef(RY, 1.0, 0.0, 0.0),
-%   ok = gl:rotatef(RX, 0.0, 1.0, 0.0),
+    ok = gl:translatef(TX, TY, 0.0),
+    ok = gl:rotatef(RY, 1.0, 0.0, 0.0),
+    ok = gl:rotatef(RX, 0.0, 1.0, 0.0),
     ok = gl:'begin'(?GL_LINES),
-    ok = grid(-2.5, 2.5),
+    ok = grid(4.0),
     ok = gl:'end'(),
     ok = gl:'begin'(?GL_LINES),
     ok = gl:color3f(1.0, 0.0, 1.0),
@@ -163,23 +277,26 @@ render(#g{sizer = Sizer, canvas = Canvas, history = History}) ->
 %   ok = gl:'end'(),
     case wxGLCanvas:swapBuffers(Canvas) of
         true  -> ok;
-        false -> {error, open_gl}
+        false -> {error, open_gl};
+        ok    -> ok % =< R23
     end.
 
+grid(Size) -> grid(-Size, Size).
+
 grid(N, Max) when N =< Max ->
-    ok = gl:vertex3f(   N,  0.0,  2.5),
-    ok = gl:vertex3f(   N,  0.0, -2.5),
-    ok = gl:vertex3f( 2.5,  0.0,    N),
-    ok = gl:vertex3f(-2.5,  0.0,    N),
-    ok = gl:vertex3f( 0.0,    N,  2.5),
-    ok = gl:vertex3f( 0.0,    N, -2.5),
-    ok = gl:vertex3f( 0.0,  2.5,    N),
-    ok = gl:vertex3f( 0.0, -2.5,    N),
-    ok = gl:vertex3f( 2.5,    N,  0.0),
-    ok = gl:vertex3f(-2.5,    N,  0.0),
-    ok = gl:vertex3f(   N,  2.5,  0.0),
-    ok = gl:vertex3f(   N, -2.5,  0.0),
-    grid(N + 0.25, Max);
+    ok = gl:vertex3f(   N,  0.0,  Max),
+    ok = gl:vertex3f(   N,  0.0, -Max),
+    ok = gl:vertex3f( Max,  0.0,    N),
+    ok = gl:vertex3f(-Max,  0.0,    N),
+    ok = gl:vertex3f( 0.0,    N,  Max),
+    ok = gl:vertex3f( 0.0,    N, -Max),
+    ok = gl:vertex3f( 0.0,  Max,    N),
+    ok = gl:vertex3f( 0.0, -Max,    N),
+    ok = gl:vertex3f( Max,    N,  0.0),
+    ok = gl:vertex3f(-Max,    N,  0.0),
+    ok = gl:vertex3f(   N,  Max,  0.0),
+    ok = gl:vertex3f(   N, -Max,  0.0),
+    grid(N + 0.2, Max);
 grid(_, _) ->
     ok.
 
