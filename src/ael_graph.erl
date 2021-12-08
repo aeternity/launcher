@@ -30,10 +30,11 @@
         {parent  = none :: wx:wx_object(),
          sizer   = none :: wx:wx_object(),
          canvas  = none :: wx:wx_object(),
+         context = none :: none | wx:wx_object(),
          gl      = none :: new | old | none,
          label_x = ""   :: string(),
          label_y = ""   :: string(),
-%        history = []   :: [entry()]}).
+%        history = []   :: [entry()],
          history = history()   :: [entry()],
          min     = 0    :: number(),
          max     = 0    :: number(),
@@ -106,17 +107,23 @@ new(Parent, Sizer, LabelX, LabelY, Entries) ->
     Graph#g{history = Entries}.
 
 
--spec show(graph()) -> ok.
+-spec show(Graph) -> NewGraph
+    when Graph    :: graph(),
+         NewGraph :: graph().
 
 show(Graph = #g{canvas = Canvas, gl = new}) ->
     Context = wxGLContext:new(Canvas),
     true = wxGLCanvas:setCurrent(Canvas, Context),
     ok = initialize(),
-    render(Graph);
+    NewGraph = Graph#g{context = Context},
+    ok = render(NewGraph),
+    NewGraph;
 show(Graph = #g{canvas = Canvas, gl = old}) ->
     ok = wxGLCanvas:setCurrent(Canvas),
     ok = initialize(),
-    render(Graph).
+    ok = render(Graph),
+    Graph.
+
 
 -spec get_wx_id(graph()) -> integer().
 
@@ -237,8 +244,17 @@ clear_r_pin(Graph) ->
 
 render(#g{gl = none}) ->
     ok;
-render(#g{sizer = Sizer, canvas = Canvas, history = History,
-          rx = RX, ry = RY, tx = TX, ty = TY}) ->
+render(#g{gl = new, context = none}) ->
+    ok;
+render(Graph = #g{gl = new, canvas = Canvas, context = Context}) ->
+    true = wxGLCanvas:setCurrent(Canvas, Context),
+    draw(Graph);
+render(Graph = #g{gl = old, canvas = Canvas}) ->
+    ok = wxGLCanvas:setCurrent(Canvas),
+    draw(Graph).
+
+draw(#g{sizer = Sizer, canvas = Canvas, history = History,
+        rx = RX, ry = RY, tx = TX, ty = TY}) ->
     ok = gl:clearColor(0.1, 0.1, 0.2, 1.0),
     ok = gl:color3f(1.0, 1.0, 1.0),
     {W, H} = wxSizer:getSize(Sizer),

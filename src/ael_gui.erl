@@ -33,8 +33,7 @@
          peer_ct     = none         :: none | wx:wx_object(),
          diff_ct     = none         :: none | wx:wx_object(),
          txpool_ct   = none         :: none | wx:wx_object(),
-         graphs      = #{}          :: map(),
-         graph_ids   = #{}          :: map(),
+         graphs      = {#{}, #{}}   :: {IDs :: map(), Graphs :: map()},
          text_ct     = none         :: none | wx:wx_object()}).
 
 
@@ -123,8 +122,8 @@ init(BuildMeta) ->
     _ = wxBoxSizer:add(StatSz,  BlockSz,  [{flag, ?wxEXPAND}, {proportion, 0}]),
     _ = wxBoxSizer:add(StatSz,  WorkSz,   [{flag, ?wxEXPAND}, {proportion, 0}]),
 
-    SyncGr = ael_graph:new(Frame, GraphSz, "X", "Y"),
-    SyncGrID = ael_graph:get_wx_id(SyncGr),
+%   SyncGr = ael_graph:new(Frame, GraphSz, "X", "Y"),
+%   SyncGrID = ael_graph:get_wx_id(SyncGr),
     DiffGr = ael_graph:new(Frame, GraphSz, "X", "Y"),
     DiffGrID = ael_graph:get_wx_id(DiffGr),
     PeerGr = ael_graph:new(Frame, GraphSz, "X", "Y"),
@@ -145,7 +144,13 @@ init(BuildMeta) ->
     ok = wxFrame:connect(Frame, command_button_clicked),
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
-    ok = ael_graph:show(DiffGr),
+    DiffGrI = ael_graph:show(DiffGr),
+    PeerGrI = ael_graph:show(PeerGr),
+    Graphs =
+        {#{diff => DiffGrID,
+           peer => PeerGrID},
+         #{DiffGrID => DiffGrI,
+           PeerGrID => PeerGrI}},
     BuildString =
         case BuildMeta of
             {AEVer, ERTSVer} ->
@@ -160,12 +165,7 @@ init(BuildMeta) ->
                conf_bn   = ConfBn,   node_bn = NodeBn,
                height_ct = HeightCt, sync_ct = SyncCt,
                diff_ct   = DiffCt,   peer_ct = PeerCt, txpool_ct = TxPoolCt,
-               graphs    = #{DiffGrID => DiffGr,
-                             PeerGrID => PeerGr,
-                             SyncGrID => SyncGr},
-               graph_ids = #{diff => DiffGrID,
-                             peer => PeerGrID,
-                             sync => SyncGrID},
+               graphs    = Graphs,
                text_ct   = TextCt},
     {Frame, State}.
 
@@ -228,7 +228,7 @@ handle_info(Unexpected, State) ->
 %% The wx_object:handle_event/2 callback.
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
 
-handle_event(#wx{event = #wxPaint{}}, State = #s{graphs = Graphs}) ->
+handle_event(#wx{event = #wxPaint{}}, State = #s{graphs = {_, Graphs}}) ->
     ok = lists:foreach(fun ael_graph:render/1, maps:values(Graphs)),
     {noreply, State};
 handle_event(Event = #wx{event = #wxMouse{}}, State) ->
@@ -249,10 +249,13 @@ handle_event(Event, State) ->
     ok = tell(info, "Unexpected event ~tp State: ~tp~n", [Event, State]),
     {noreply, State}.
 
-handle_mouse(#wx{id = ID, event = Event}, State = #s{graphs = Graphs}) ->
+handle_mouse(#wx{id = ID, event = Event}, State = #s{graphs = {GraphIDs, Graphs}}) ->
     case maps:find(ID, Graphs) of
-        {ok, Graph} -> State#s{graphs = maps:put(ID, do_graph_update(Graph, Event), Graphs)};
-        false       -> State
+        {ok, Graph} ->
+            NewGraphs = maps:put(ID, do_graph_update(Graph, Event), Graphs),
+            State#s{graphs = {GraphIDs, NewGraphs}};
+        error ->
+            State
     end.
 
 do_graph_update(Graph, #wxMouse{type = motion, leftDown = true, x = X, y = Y}) ->
@@ -261,15 +264,15 @@ do_graph_update(Graph, #wxMouse{type = left_up}) ->
     ael_graph:clear_t_pin(Graph);
 do_graph_update(Graph, #wxMouse{type = motion, leftDown = false}) ->
     ael_graph:clear_t_pin(Graph);
-%o_graph_update(Graph, #wxMouse{type = motion, rightDown = true, x = X, y = Y}) ->
-%   tell(info, "Right down and moving"),
-%   ael_graph:rotate(X, Y, Graph);
-%o_graph_update(Graph, #wxMouse{type = right_down, x = X, y = Y}) ->
-%   ael_graph:rotate(X, Y, Graph);
-%o_graph_update(Graph, #wxMouse{type = right_up, x = X, y = Y}) ->
-%   ael_graph:clear_r_pin(ael_graph:rotate(X, Y, Graph));
-%o_graph_update(Graph, #wxMouse{type = motion, rightDown = false}) ->
-%   ael_graph:clear_r_pin(Graph);
+do_graph_update(Graph, #wxMouse{type = motion, rightDown = true, x = X, y = Y}) ->
+    tell(info, "Right down and moving"),
+    ael_graph:rotate(X, Y, Graph);
+do_graph_update(Graph, #wxMouse{type = right_down, x = X, y = Y}) ->
+    ael_graph:rotate(X, Y, Graph);
+do_graph_update(Graph, #wxMouse{type = right_up, x = X, y = Y}) ->
+    ael_graph:clear_r_pin(ael_graph:rotate(X, Y, Graph));
+do_graph_update(Graph, #wxMouse{type = motion, rightDown = false}) ->
+    ael_graph:clear_r_pin(Graph);
 do_graph_update(Graph, #wxMouse{}) ->
     Graph.
 
@@ -338,10 +341,10 @@ do_show(Terms, State = #s{text_ct = TextC}) ->
 
 do_stat({height, Now},
         State = #s{sync = {true, Complete}, height_ct = HeightCt, height = OldTop,
-                   graphs = Graphs, graph_ids = GraphIDs}) ->
+                   graphs = Graphs}) ->
     Top = calc_top(Now, Complete),
     Diff = OldTop - Top,
-    NewGraphs = update_graph(maps:find(sync, GraphIDs), Graphs, Diff),
+    NewGraphs = update_graph(sync, Graphs, Diff),
     Text = unicode:characters_to_list([integer_to_list(Now), "/", integer_to_list(Top)]),
     ok = wxTextCtrl:changeValue(HeightCt, Text),
     State#s{height = Now, graphs = NewGraphs};
@@ -349,15 +352,15 @@ do_stat({height, Now}, State = #s{sync = false, height_ct = HeightCt}) ->
     ok = wxTextCtrl:changeValue(HeightCt, integer_to_list(Now)),
     State;
 do_stat({difficulty, Rating},
-        State = #s{diff_ct = DiffCt, graphs = Graphs, graph_ids = GraphIDs}) ->
-    NewGraphs = update_graph(maps:find(diff, GraphIDs), Graphs, Rating),
+        State = #s{diff_ct = DiffCt, graphs = Graphs}) ->
+    NewGraphs = update_graph(diff, Graphs, Rating),
     ok = wxTextCtrl:changeValue(DiffCt, integer_to_list(Rating)),
     State#s{graphs = NewGraphs};
 do_stat({sync, Sync = {true, Complete}},
         State = #s{height = Now, height_ct = HeightCt, sync_ct = SyncCt,
-                   graphs = Graphs, graph_ids = GraphIDs}) ->
+                   graphs = Graphs}) ->
     Top = calc_top(Now, Complete),
-    NewGraphs = update_graph(maps:find(sync, GraphIDs), Graphs, 0),
+    NewGraphs = update_graph(sync, Graphs, 0),
     Text = unicode:characters_to_list([integer_to_list(Now), "/", integer_to_list(Top)]),
     ok = wxTextCtrl:changeValue(HeightCt, Text),
     SyncText = io_lib:format("~.2f%", [Complete]),
@@ -365,19 +368,19 @@ do_stat({sync, Sync = {true, Complete}},
     State#s{sync = Sync, graphs = NewGraphs};
 do_stat({sync, {false, Complete}},
         State = #s{height = Now, height_ct = HeightCt, sync_ct = SyncCt,
-                   graphs = Graphs, graph_ids = GraphIDs}) ->
-    NewGraphs = update_graph(maps:find(sync, GraphIDs), Graphs, 0),
+                   graphs = Graphs}) ->
+    NewGraphs = update_graph(sync, Graphs, 0),
     ok = wxTextCtrl:changeValue(HeightCt, integer_to_list(Now)),
     SyncText = io_lib:format("~.2f%", [Complete]),
     ok = wxTextCtrl:changeValue(SyncCt, SyncText),
     State#s{sync = false, graphs = NewGraphs};
 do_stat({peers, {PeerCount, PeerConnI, PeerConnO}},
-        State = #s{peer_ct = PeerCt, graphs = Graphs, graph_ids = GraphIDs}) ->
+        State = #s{peer_ct = PeerCt, graphs = Graphs}) ->
     Figures =
         ["Total: ", integer_to_list(PeerCount),
          " (In: ", integer_to_list(PeerConnI), " / ",
          "Out : ",  integer_to_list(PeerConnO), ") "],
-    NewGraphs = update_graph(maps:find(peer, GraphIDs), Graphs, PeerCount),
+    NewGraphs = update_graph(peer, Graphs, PeerCount),
     Text = unicode:characters_to_list(Figures),
     ok = wxTextCtrl:changeValue(PeerCt, Text),
     State#s{graphs = NewGraphs};
@@ -390,11 +393,17 @@ calc_top(Now, Complete) when Complete > 0 ->
 calc_top(_, _) ->
     0.
 
-update_graph(ID, Graphs, Diff) ->
-    TS = erlang:timestamp(),
-    Graph = maps:get(ID, Graphs),
-    NewGraph = ael_graph:update(Graph, {TS, Diff}),
-    maps:put(ID, NewGraph, Graphs).
+update_graph(Name, G = {GraphIDs, Graphs}, Diff) ->
+    case maps:find(Name, GraphIDs) of
+        {ok, ID} ->
+            TS = erlang:timestamp(),
+            Graph = maps:get(ID, Graphs),
+            NewGraph = ael_graph:update(Graph, {TS, Diff}),
+            NewGraphs = maps:put(ID, NewGraph, Graphs),
+            {GraphIDs, NewGraphs};
+        error ->
+            G
+    end.
 
 
 conf(State) ->
