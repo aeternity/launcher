@@ -258,19 +258,20 @@ handle_mouse(#wx{id = ID, event = Event}, State = #s{graphs = {GraphIDs, Graphs}
             State
     end.
 
-do_graph_update(Graph, #wxMouse{type = motion, leftDown = true, x = X, y = Y}) ->
+do_graph_update(Graph, #wxMouse{type = motion, leftDown = true, rightDown = false,
+                                x = X, y = Y}) ->
     ael_graph:traverse(X, Y, Graph);
 do_graph_update(Graph, #wxMouse{type = left_up}) ->
     ael_graph:clear_t_pin(Graph);
 do_graph_update(Graph, #wxMouse{type = motion, leftDown = false}) ->
     ael_graph:clear_t_pin(Graph);
-do_graph_update(Graph, #wxMouse{type = motion, rightDown = true, x = X, y = Y}) ->
-    tell(info, "Right down and moving"),
+do_graph_update(Graph, #wxMouse{type = motion, leftDown = true, rightDown = true,
+                                x = X, y = Y}) ->
     ael_graph:rotate(X, Y, Graph);
 do_graph_update(Graph, #wxMouse{type = right_down, x = X, y = Y}) ->
-    ael_graph:rotate(X, Y, Graph);
-do_graph_update(Graph, #wxMouse{type = right_up, x = X, y = Y}) ->
-    ael_graph:clear_r_pin(ael_graph:rotate(X, Y, Graph));
+    ael_graph:rotate(X, Y, ael_graph:clear_t_pin(Graph));
+do_graph_update(Graph, #wxMouse{type = right_up}) ->
+    ael_graph:clear_r_pin(Graph);
 do_graph_update(Graph, #wxMouse{type = motion, rightDown = false}) ->
     ael_graph:clear_r_pin(Graph);
 do_graph_update(Graph, #wxMouse{}) ->
