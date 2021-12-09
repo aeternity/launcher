@@ -26,6 +26,19 @@
 -opaque([graph/0]).
 -include("$zx_include/zx_logger.hrl").
 
+-record(h,
+        {entries = []  :: [entry()],
+         min     = 0   :: number(),
+         min2    = 0   :: number(),
+         max     = 0   :: number(),
+         max2    = 0   :: number(),
+         min_i   = 0   :: non_neg_integer(),
+         min2_i  = 0   :: non_neg_integer(),
+         max_i   = 0   :: non_neg_integer(),
+         max2_i  = 0   :: non_neg_integer(),
+         size    = 0   :: integer(),
+         full    = 500 :: integer()}).
+
 -record(g,
         {parent  = none :: wx:wx_object(),
          sizer   = none :: wx:wx_object(),
@@ -34,28 +47,27 @@
          gl      = none :: new | old | none,
          label_x = ""   :: string(),
          label_y = ""   :: string(),
-%        history = []   :: [entry()],
-         history = history()   :: [entry()],
-         min     = 0    :: number(),
-         max     = 0    :: number(),
+%        history = #h{} :: [entry()],
+         history = history(500) :: [entry()],
          tpin    = none :: none | pin(),
          rpin    = none :: none | pin(),
          tx      =  0.0 :: number(),
-         ty      = -1.0 :: number(),
+         ty      = -0.6 :: number(),
          rx      =  0.0 :: number(),
          ry      =  0.0 :: number()}).
 
 
--type graph() :: #g{}.
--type pin()   :: {ClickX :: non_neg_integer(),
-                  ClickY :: non_neg_integer(),
-                  OrigX  :: non_neg_integer(),
-                  OrigY  :: non_neg_integer()}.
--type entry() :: {erlang:timestamp(), number()}.
+-type graph()   :: #g{}.
+-type pin()     :: {ClickX :: non_neg_integer(),
+                    ClickY :: non_neg_integer(),
+                    OrigX  :: non_neg_integer(),
+                    OrigY  :: non_neg_integer()}.
+-type entry()   :: {erlang:timestamp(), number()}.
 
 
-history() ->
-    [{C, rand:uniform()} || C <- lists:seq(1, 500)].
+history(N) ->
+    Entries = [{C, rand:uniform()} || C <- lists:seq(1, N)],
+    lists:foldl(fun add_entry/2, #h{}, Entries).
 
 -spec new(Parent, Sizer, LabelX, LabelY) -> Graph
     when Parent :: wx:wx_object(),
@@ -104,11 +116,12 @@ new(Parent, Sizer, LabelX, LabelY) ->
 
 new(Parent, Sizer, LabelX, LabelY, Entries) ->
     Graph = new(Parent, Sizer, LabelX, LabelY),
-    Graph#g{history = Entries}.
+    lists:foldl(fun add_entry/2, Graph, lists:reverse(Entries)).
 
 
--spec show(Graph) -> NewGraph
+-spec show(Graph) -> {Outcome, NewGraph}
     when Graph    :: graph(),
+         Outcome  :: ok | {error, gl},
          NewGraph :: graph().
 
 show(Graph = #g{canvas = Canvas, gl = new}) ->
@@ -116,13 +129,11 @@ show(Graph = #g{canvas = Canvas, gl = new}) ->
     true = wxGLCanvas:setCurrent(Canvas, Context),
     ok = initialize(),
     NewGraph = Graph#g{context = Context},
-    ok = render(NewGraph),
-    NewGraph;
+    render(NewGraph);
 show(Graph = #g{canvas = Canvas, gl = old}) ->
     ok = wxGLCanvas:setCurrent(Canvas),
     ok = initialize(),
-    ok = render(Graph),
-    Graph.
+    render(Graph).
 
 
 -spec get_wx_id(graph()) -> integer().
@@ -139,55 +150,60 @@ initialize() ->
     ok.
 
 
--spec update(Graph, Entry) -> NewGraph
+-spec update(Graph, Entry) -> {Outcome, NewGraph}
     when Graph    :: graph(),
          Entry    :: entry(),
+         Outcome  :: ok | {error, gl},
          NewGraph :: graph().
 
-update(Graph, Entry) ->
-    NewGraph = add_entry(Graph, Entry),
-    ok = render(NewGraph),
-    NewGraph.
+update(Graph = #g{history = History}, Entry) ->
+    NewGraph = Graph#g{history = add_entry(History, Entry)},
+    render(NewGraph).
 
 
--spec updates(Graph, Entries) -> NewGraph
+-spec updates(Graph, Entries) -> {Outcome, NewGraph}
     when Graph    :: graph(),
          Entries  :: [entry()],
+         Outcome  :: ok | {error, gl},
          NewGraph :: graph().
 
-updates(Graph, Entries) ->
-    NewGraph = lists:foldl(fun add_entry/2, Graph, lists:reverse(Entries)),
-    ok = render(NewGraph),
-    NewGraph.
+updates(Graph = #g{history = History}, Entries) ->
+    NewHistory = lists:foldl(fun add_entry/2, History, lists:reverse(Entries)),
+    NewGraph = Graph#g{history = NewHistory},
+    render(NewGraph).
 
-add_entry(Entry = {_, Value}, Graph = #g{history = History, min = Min, max = Max}) ->
-    NewMin = min(Min, Value),
-    NewMax = max(Max, Value),
-    Graph#g{history = [Entry | History], min = NewMin, max = NewMax}.
+add_entry(Entry = {_, V},
+          History = #h{entries = Entries,
+                       min    = Min,   max    = Max,
+                       min2   = Min2,  max2   = Max2,
+                       min_i  = MaxI,  max_i  = MinI,
+                       min2_i = Max2I, max2_i = Min2I,
+                       size = Size, full = Full}) ->
+    NewMin = min(Min, V),
+    NewMax = max(Max, V),
+    History#h{entries = [Entry | Entries], min = NewMin, max = NewMax}.
 
 
--spec clear(Graph) -> NewGraph
+-spec clear(Graph) -> {Outcome, NewGraph}
     when Graph    :: graph(),
+         Outcome  :: ok | {error, gl},
          NewGraph :: graph().
 
 clear(Graph) ->
-    NewGraph = Graph#g{history = [],
-                       min = 0, max = 0,
-                       tx = 0.0, ty = -1.0, rx = 0.0, ry = 0.0},
-    ok = render(NewGraph),
-    NewGraph.
+    NewGraph = Graph#g{history = #h{}, tx = 0.0, ty = -1.0, rx = 0.0, ry = 0.0},
+    render(NewGraph).
 
 
--spec traverse(X, Y, Graph) -> NewGraph
+-spec traverse(X, Y, Graph) -> {Outcome, NewGraph}
     when Graph    :: graph(),
          X        :: number(),
          Y        :: number(),
+         Outcome  :: ok | {error, gl},
          NewGraph :: graph().
 
 traverse(X, Y, Graph) ->
     NewGraph = tupdate(X, Y, Graph),
-    ok = render(NewGraph),
-    NewGraph.
+    render(NewGraph).
 
 tupdate(X, Y, Graph = #g{tpin = none, tx = TX, ty = TY}) ->
     TPIN = {X, Y, TX, TY},
@@ -199,16 +215,16 @@ tupdate(X, Y, Graph = #g{tpin = {PX, PY, OrigX, OrigY}}) ->
 
 
 
--spec rotate(X, Y, Graph) -> NewGraph
+-spec rotate(X, Y, Graph) -> {Outcome, NewGraph}
     when Graph    :: graph(),
          X        :: number(),
          Y        :: number(),
+         Outcome  :: ok | {error, gl},
          NewGraph :: graph().
 
 rotate(X, Y, Graph) ->
     NewGraph = rupdate(X, Y, Graph),
-    ok = render(NewGraph),
-    NewGraph.
+    render(NewGraph).
 
 rupdate(X, Y, Graph = #g{rpin = none, rx = RX, ry = RY}) ->
     RPIN = {X, Y, RX, RY},
@@ -239,13 +255,15 @@ clear_r_pin(Graph) ->
     Graph.
 
 
--spec render(Graph) -> ok
-    when Graph :: graph().
+-spec render(Graph) -> {Outcome, NewGraph}
+    when Graph    :: graph(),
+         Outcome  :: ok | {error, gl},
+         NewGraph :: graph().
 
-render(#g{gl = none}) ->
-    ok;
-render(#g{gl = new, context = none}) ->
-    ok;
+render(Graph = #g{gl = none}) ->
+    Graph;
+render(Graph = #g{gl = new, context = none}) ->
+    Graph;
 render(Graph = #g{gl = new, canvas = Canvas, context = Context}) ->
     true = wxGLCanvas:setCurrent(Canvas, Context),
     draw(Graph);
@@ -253,8 +271,8 @@ render(Graph = #g{gl = old, canvas = Canvas}) ->
     ok = wxGLCanvas:setCurrent(Canvas),
     draw(Graph).
 
-draw(#g{sizer = Sizer, canvas = Canvas, history = History,
-        rx = RX, ry = RY, tx = TX, ty = TY}) ->
+draw(Graph = #g{sizer = Sizer, canvas = Canvas, history = History,
+                rx = RX, ry = RY, tx = TX, ty = TY}) ->
     ok = gl:clearColor(0.1, 0.1, 0.2, 1.0),
     ok = gl:color3f(1.0, 1.0, 1.0),
     {W, H} = wxSizer:getSize(Sizer),
@@ -274,7 +292,7 @@ draw(#g{sizer = Sizer, canvas = Canvas, history = History,
     ok = gl:'end'(),
     ok = gl:'begin'(?GL_LINES),
     ok = gl:color3f(1.0, 0.0, 1.0),
-    ok = bars(History),
+    NewHistory = bars(History),
     ok = gl:'end'(),
 %   ok = gl:'begin'(?GL_TRIANGLE_STRIP),
 %   T =
@@ -291,10 +309,11 @@ draw(#g{sizer = Sizer, canvas = Canvas, history = History,
 %        {{1.0, 0.0, 0.0}, {-1.0,  0.0,  1.0}}],
 %   ok = lists:foreach(T, Data),
 %   ok = gl:'end'(),
+    NewGraph = Graph#g{history = NewHistory},
     case wxGLCanvas:swapBuffers(Canvas) of
-        true  -> ok;
-        false -> {error, open_gl};
-        ok    -> ok % =< R23
+        true  -> {ok, NewGraph};
+        ok    -> {ok, NewGraph}; % =< R23
+        false -> {{error, gl}, NewGraph}
     end.
 
 grid(Size) -> grid(-Size, Size).
@@ -312,11 +331,13 @@ grid(N, Max) when N =< Max ->
     ok = gl:vertex3f(-Max,    N,  0.0),
     ok = gl:vertex3f(   N,  Max,  0.0),
     ok = gl:vertex3f(   N, -Max,  0.0),
-    grid(N + 0.2, Max);
+    grid(N + 0.3, Max);
 grid(_, _) ->
     ok.
 
-bars(History) -> bars(History, 2.5).
+bars(History = #h{entries = Entries}) ->
+    ok = bars(Entries, 2.5),
+    History.
 
 bars([{_, N} | Rest], Offset) ->
     ok = gl:vertex3f(Offset, 0.0, 0.0),

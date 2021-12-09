@@ -161,10 +161,10 @@ init(BuildMeta) ->
     ok = wxFrame:connect(Frame, command_button_clicked),
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
-    DiffGrI = ael_graph:show(DiffGr),
-    PeerGrI = ael_graph:show(PeerGr),
-    SyncGrI = ael_graph:show(SyncGr),
-    TxPoolGrI = ael_graph:show(TxPoolGr),
+    {ok, DiffGrI} = ael_graph:show(DiffGr),
+    {ok, PeerGrI} = ael_graph:show(PeerGr),
+    {ok, SyncGrI} = ael_graph:show(SyncGr),
+    {ok, TxPoolGrI} = ael_graph:show(TxPoolGr),
     Graphs =
         {#{pool => TxPoolGrID,
            diff => DiffGrID,
@@ -283,16 +283,19 @@ handle_mouse(#wx{id = ID, event = Event}, State = #s{graphs = {GraphIDs, Graphs}
 
 do_graph_update(Graph, #wxMouse{type = motion, leftDown = true, rightDown = false,
                                 x = X, y = Y}) ->
-    ael_graph:traverse(X, Y, Graph);
+    {ok, NewGraph} = ael_graph:traverse(X, Y, Graph),
+    NewGraph;
 do_graph_update(Graph, #wxMouse{type = left_up}) ->
     ael_graph:clear_t_pin(Graph);
 do_graph_update(Graph, #wxMouse{type = motion, leftDown = false}) ->
     ael_graph:clear_t_pin(Graph);
 do_graph_update(Graph, #wxMouse{type = motion, leftDown = true, rightDown = true,
                                 x = X, y = Y}) ->
-    ael_graph:rotate(X, Y, Graph);
+    {ok, NewGraph} = ael_graph:rotate(X, Y, Graph),
+    NewGraph;
 do_graph_update(Graph, #wxMouse{type = right_down, x = X, y = Y}) ->
-    ael_graph:rotate(X, Y, ael_graph:clear_t_pin(Graph));
+    {ok, NewGraph} = ael_graph:rotate(X, Y, ael_graph:clear_t_pin(Graph)),
+    NewGraph;
 do_graph_update(Graph, #wxMouse{type = right_up}) ->
     ael_graph:clear_r_pin(Graph);
 do_graph_update(Graph, #wxMouse{type = motion, rightDown = false}) ->
