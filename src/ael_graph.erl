@@ -29,13 +29,7 @@
 -record(h,
         {entries = []  :: [entry()],
          min     = 0   :: number(),
-         min2    = 0   :: number(),
          max     = 0   :: number(),
-         max2    = 0   :: number(),
-         min_i   = 0   :: non_neg_integer(),
-         min2_i  = 0   :: non_neg_integer(),
-         max_i   = 0   :: non_neg_integer(),
-         max2_i  = 0   :: non_neg_integer(),
          size    = 0   :: integer(),
          full    = 500 :: integer()}).
 
@@ -47,8 +41,8 @@
          gl      = none :: new | old | none,
          label_x = ""   :: string(),
          label_y = ""   :: string(),
-%        history = #h{} :: [entry()],
-         history = history(500) :: [entry()],
+         history = #h{} :: [entry()],
+%        history = history(500) :: [entry()],
          tpin    = none :: none | pin(),
          rpin    = none :: none | pin(),
          tx      =  0.0 :: number(),
@@ -65,9 +59,9 @@
 -type entry()   :: {erlang:timestamp(), number()}.
 
 
-history(N) ->
-    Entries = [{C, rand:uniform()} || C <- lists:seq(1, N)],
-    lists:foldl(fun add_entry/2, #h{}, Entries).
+%history(N) ->
+%    Entries = [{C, rand:uniform()} || C <- lists:seq(1, N)],
+%    lists:foldl(fun add_entry/2, #h{}, Entries).
 
 -spec new(Parent, Sizer, LabelX, LabelY) -> Graph
     when Parent :: wx:wx_object(),
@@ -157,7 +151,7 @@ initialize() ->
          NewGraph :: graph().
 
 update(Graph = #g{history = History}, Entry) ->
-    NewGraph = Graph#g{history = add_entry(History, Entry)},
+    NewGraph = Graph#g{history = add_entry(Entry, History)},
     render(NewGraph).
 
 
@@ -172,15 +166,10 @@ updates(Graph = #g{history = History}, Entries) ->
     NewGraph = Graph#g{history = NewHistory},
     render(NewGraph).
 
-add_entry(Entry = {_, V},
-          History = #h{entries = Entries,
-                       min    = Min,   max    = Max,
-                       min2   = Min2,  max2   = Max2,
-                       min_i  = MaxI,  max_i  = MinI,
-                       min2_i = Max2I, max2_i = Min2I,
-                       size = Size, full = Full}) ->
-    NewMin = min(Min, V),
-    NewMax = max(Max, V),
+add_entry(Entry = {_, Value},
+          History = #h{entries = Entries, min = Min, max = Max}) ->
+    NewMin = min(Min, Value),
+    NewMax = max(Max, Value),
     History#h{entries = [Entry | Entries], min = NewMin, max = NewMax}.
 
 
@@ -294,21 +283,6 @@ draw(Graph = #g{sizer = Sizer, canvas = Canvas, history = History,
     ok = gl:color3f(1.0, 0.0, 1.0),
     NewHistory = bars(History),
     ok = gl:'end'(),
-%   ok = gl:'begin'(?GL_TRIANGLE_STRIP),
-%   T =
-%       fun({{R, G, B}, {X, Y, Z}}) ->
-%           ok = gl:color3f(R, G, B),
-%           ok = gl:vertex3f(X, Y, Z)
-%       end,
-%   Data =
-%       [{{1.0, 0.0, 1.0}, { 0.0,  1.0,  0.0}},
-%        {{1.0, 0.0, 0.0}, {-1.0,  0.0,  1.0}},
-%        {{0.0, 1.0, 0.0}, { 1.0,  0.0,  1.0}},
-%        {{0.0, 0.0, 1.0}, { 0.0,  0.0, -1.0}},
-%        {{1.0, 0.0, 1.0}, { 0.0,  1.0,  0.0}},
-%        {{1.0, 0.0, 0.0}, {-1.0,  0.0,  1.0}}],
-%   ok = lists:foreach(T, Data),
-%   ok = gl:'end'(),
     NewGraph = Graph#g{history = NewHistory},
     case wxGLCanvas:swapBuffers(Canvas) of
         true  -> {ok, NewGraph};
@@ -331,20 +305,25 @@ grid(N, Max) when N =< Max ->
     ok = gl:vertex3f(-Max,    N,  0.0),
     ok = gl:vertex3f(   N,  Max,  0.0),
     ok = gl:vertex3f(   N, -Max,  0.0),
-    grid(N + 0.3, Max);
+    grid(N + 0.5, Max);
 grid(_, _) ->
     ok.
 
-bars(History = #h{entries = Entries}) ->
-    ok = bars(Entries, 2.5),
+bars(History = #h{entries = Entries, min = Min, max = Max}) ->
+    ok = bars(Entries, Min, Max, 2.5),
     History.
 
-bars([{_, N} | Rest], Offset) ->
+bars([{_, Value} | Rest], Min, Max, Offset) ->
+    Scaled = scale(Value, Min, Max),
     ok = gl:vertex3f(Offset, 0.0, 0.0),
-    ok = gl:vertex3f(Offset,   N, 0.0),
-    bars(Rest, Offset - 0.01);
-bars([], _) ->
+    ok = gl:vertex3f(Offset,   Scaled, 0.0),
+    bars(Rest, Min, Max, Offset - 0.01);
+bars([], _, _,  _) ->
     ok.
+
+scale(Value, Min, Max) ->
+    Magnitude = max(abs(Min), abs(Max)),
+    (Value * 1.5) / Magnitude.
 
 -spec destroy(graph()) -> ok.
 

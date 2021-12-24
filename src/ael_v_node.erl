@@ -15,10 +15,11 @@
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
 
+-behavior(ael_view).
 -behavior(wx_object).
 -include_lib("wx/include/wx.hrl").
--export([show/1, stat/1, ask_install/0]).
--export([start_link/1]).
+-export([stat/1, ask_install/0]).
+-export([start_link/1, to_front/1]).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2,
          handle_event/2, handle_sync_event/3]).
@@ -36,8 +37,7 @@
          peer_ct     = none         :: none | wx:wx_object(),
          diff_ct     = none         :: none | wx:wx_object(),
          txpool_ct   = none         :: none | wx:wx_object(),
-         graphs      = {#{}, #{}}   :: {IDs :: map(), Graphs :: map()},
-         text_ct     = none         :: none | wx:wx_object()}).
+         graphs      = {#{}, #{}}   :: {IDs :: map(), Graphs :: map()}}).
 
 
 -type state() :: term().
@@ -48,10 +48,9 @@
 
 %%% Interface functions
 
--spec show(term()) -> ok.
 
-show(Terms) ->
-    wx_object:cast(?MODULE, {show, Terms}).
+to_front(Win) ->
+    wx_object:cast(Win, to_front).
 
 
 -spec stat([Element]) -> ok
@@ -74,14 +73,14 @@ ask_install() ->
 
 %%% Startup Functions
 
-start_link(BuildMeta) ->
-    wx_object:start_link({local, ?MODULE}, ?MODULE, BuildMeta, []).
+start_link(none) ->
+    wx_object:start_link({local, ?MODULE}, ?MODULE, none, []).
 
 
-init(BuildMeta) ->
+init(none) ->
     ok = log(info, "GUI starting..."),
     Wx = wx:new(),
-    Frame = wxFrame:new(Wx, ?wxID_ANY, "ÆL"),
+    Frame = wxFrame:new(Wx, ?wxID_ANY, "Local ÆL Node"),
     FrameSz = wxBoxSizer:new(?wxHORIZONTAL),
     Window = wxScrolledWindow:new(Frame),
     _ = wxBoxSizer:add(FrameSz, Window, zxw:flags(wide)),
@@ -148,16 +147,12 @@ init(BuildMeta) ->
     _ = wxBoxSizer:add(StatSz,  PeerSz,   [{flag, ?wxEXPAND}, {proportion, 1}]),
     _ = wxBoxSizer:add(StatSz,  SyncSz,   [{flag, ?wxEXPAND}, {proportion, 1}]),
 
-    TextStyle = [{style, ?wxTE_MULTILINE}],
-    TextCt = wxTextCtrl:new(Window, ?wxID_ANY, TextStyle),
-
     _ = wxSizer:add(MainSz, ButtSz, zxw:flags(base)),
     _ = wxSizer:add(MainSz, StatSz, zxw:flags(base)),
-    _ = wxSizer:add(MainSz, TextCt, zxw:flags(wide)),
     _ = wxScrolledWindow:setSizerAndFit(Window, MainSz),
     ok = wxScrolledWindow:setScrollRate(Window, 0, 5),
     _ = wxFrame:setSizer(Frame, FrameSz),
-    ok = wxFrame:setSize(Frame, {700, 600}),
+    ok = wxFrame:setSize(Frame, {500, 900}),
     _ = wxSizer:layout(FrameSz),
 
     ok = wxFrame:connect(Frame, close_window),
@@ -177,22 +172,11 @@ init(BuildMeta) ->
            DiffGrID   => DiffGrI,
            PeerGrID   => PeerGrI,
            SyncGrID   => SyncGrI}},
-    BuildString =
-        case BuildMeta of
-            {AEVer, ERTSVer} ->
-                Format = "Current build: AE ~s built with ERTS ~s.~n",
-                io_lib:format(Format, [AEVer, ERTSVer]);
-            none ->
-                ok = wxButton:setLabel(NodeBn, "Build Node"),
-                "No AE node is currently built.\n"
-        end,
-    ok = wxTextCtrl:appendText(TextCt, BuildString),
     State = #s{frame     = Frame,
                conf_bn   = ConfBn,   node_bn = NodeBn,
                height_ct = HeightCt, sync_ct = SyncCt,
                diff_ct   = DiffCt,   peer_ct = PeerCt, txpool_ct = TxPoolCt,
-               graphs    = Graphs,
-               text_ct   = TextCt},
+               graphs    = Graphs},
     {Frame, State}.
 
 
@@ -222,12 +206,12 @@ handle_call(Unexpected, From, State) ->
 %% The gen_server:handle_cast/2 callback.
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_cast-2
 
-handle_cast({show, Terms}, State) ->
-    NewState = do_show(Terms, State),
-    {noreply, NewState};
 handle_cast({stat, Elements}, State) ->
     NewState = lists:foldl(fun do_stat/2, State, Elements),
     {noreply, NewState};
+handle_cast(to_front, State = #s{frame = Frame}) ->
+    ok = wxWindow:raise(Frame),
+    {noreply, State};
 handle_cast(Unexpected, State) ->
     ok = tell(warning, "Unexpected cast: ~tp~n", [Unexpected]),
     {noreply, State}.
@@ -357,18 +341,6 @@ ask_yes_no(Frame, Message) ->
     Response.
 
 
-
-do_show(Terms, State = #s{text_ct = TextC}) ->
-    ok = log(info, Terms),
-    String =
-        case io_lib:deep_char_list(Terms) of
-            true  -> Terms;
-            false -> io_lib:format("~tw~n", [Terms])
-        end,
-    ok = wxTextCtrl:appendText(TextC, unicode:characters_to_list(String)),
-    State.
-
-
 do_stat({height, Now},
         State = #s{sync = {true, Complete}, height_ct = HeightCt, height = OldTop,
                    graphs = Graphs}) ->
@@ -414,9 +386,11 @@ do_stat({peers, {PeerCount, PeerConnI, PeerConnO}},
     Text = unicode:characters_to_list(Figures),
     ok = wxTextCtrl:changeValue(PeerCt, Text),
     State#s{graphs = NewGraphs};
-do_stat({txpool, Count}, State = #s{txpool_ct = TXPoolCt}) ->
-    ok = wxTextCtrl:changeValue(TXPoolCt, integer_to_list(Count)),
-    State.
+do_stat({txpool, Count},
+        State = #s{txpool_ct = TxPoolCt, graphs = Graphs}) ->
+    NewGraphs = update_graph(pool, Graphs, Count),
+    ok = wxTextCtrl:changeValue(TxPoolCt, integer_to_list(Count)),
+    State#s{graphs = NewGraphs}.
 
 calc_top(Now, Complete) when Complete > 0 ->
     trunc((Now * 100) / Complete);
@@ -428,7 +402,7 @@ update_graph(Name, G = {GraphIDs, Graphs}, Diff) ->
         {ok, ID} ->
             TS = erlang:timestamp(),
             Graph = maps:get(ID, Graphs),
-            NewGraph = ael_graph:update(Graph, {TS, Diff}),
+            {ok, NewGraph} = ael_graph:update(Graph, {TS, Diff}),
             NewGraphs = maps:put(ID, NewGraph, Graphs),
             {GraphIDs, NewGraphs};
         error ->
@@ -441,13 +415,11 @@ conf(State) ->
     State.
 
 
-run_node(State = #s{text_ct = TextC}) ->
-    ok = wxTextCtrl:appendText(TextC, "NODE button clicked!\n"),
+run_node(State) ->
     ok = ael_con:run_node(),
     State.
 
 
 close(State = #s{frame = Frame}) ->
-    ok = ael_con:stop(),
     ok = wxFrame:destroy(Frame),
     State.

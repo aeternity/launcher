@@ -146,6 +146,6 @@ do_poll(State = #s{interval = Interval}) ->
          {sync,       Sync},
          {peers,      {PeerCount, PeerConnI, PeerConnO}},
          {txpool,     TXPoolSize}],
-    ok = ael_gui:stat(Update),
+    ok = ael_v_node:stat(Update),
     T = erlang:send_after(Interval, self(), poll),
     State#s{timer = T}.

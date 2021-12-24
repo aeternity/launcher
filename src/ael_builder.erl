@@ -78,7 +78,7 @@ clone_repo(Git, ERTS) ->
     ok = external(Command),
     ok = file:set_cwd(Git),
 %   ok = external("git checkout " ++ ?tag),
-    ok = external("git checkout gh3786-add-app_ctrl-dep"),
+%   ok = external("git checkout gh3786-add-app_ctrl-dep"),
     check_build(Git, ERTS).
 
 check_build(Git, ERTS) ->

@@ -95,6 +95,7 @@ init(BuildMeta) ->
     _ = wxSizer:add(MainSz, Console, zxw:flags(wide)),
 
     _ = wxFrame:setSizer(Frame, MainSz),
+    ok = wxFrame:setSize(Frame, {500, 500}),
     _ = wxSizer:layout(MainSz),
 
     ok = wxFrame:connect(Frame, close_window),
@@ -246,17 +247,6 @@ do_show(Terms, State = #s{console = Console}) ->
             false -> io_lib:format("~tw~n", [Terms])
         end,
     ok = wxTextCtrl:appendText(Console, unicode:characters_to_list(String)),
-    State.
-
-
-conf(State) ->
-    ok = ael_con:show_conf(),
-    State.
-
-
-run_node(State = #s{console = Console}) ->
-    ok = wxTextCtrl:appendText(Console, "NODE button clicked!\n"),
-    ok = ael_con:run_node(),
     State.
 
 
