@@ -1,7 +1,7 @@
 %%% @doc
 %%% ÆL Controller
 %%%
-%%% This process is a in charge of maintaining the program's state.
+%%% This process is a in charge of maintaining the program's core state.
 %%% @end
 
 -module(ael_con).
