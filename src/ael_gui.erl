@@ -33,29 +33,18 @@
 
 
 -record(s,
-        {frame       = none :: none | wx:wx_object(),
-         conf_bn     = none :: none | wx:wx_object(),
-         conf_id     = none :: none | integer(),
-         conf_pid    = none :: none | pid(),
-         node_bn     = none :: none | wx:wx_object(),
-         node_id     = none :: none | integer(),
-         node_pid    = none :: none | pid(),
-         chain_bn    = none :: none | wx:wx_object(),
-         chain_id    = none :: none | integer(),
-         chain_pid   = none :: none | pid(),
-         dev_bn      = none :: none | wx:wx_object(),
-         dev_id      = none :: none | integer(),
-         dev_pid     = none :: none | pid(),
-         network_bn  = none :: none | wx:wx_object(),
-         network_id  = none :: none | integer(),
-         network_pid = none :: none | pid(),
-         mempool_bn  = none :: none | wx:wx_object(),
-         mempool_id  = none :: none | integer(),
-         mempool_pid = none :: none | pid(),
-         console_ct  = none :: none | wx:wx_object()}).
+        {frame   = none :: none | wx:wx_object(),
+         buttons = []   :: [button()],
+         console = none :: none | wx:wx_object()}).
+
+-record(button,
+        {name = none :: none | module(),
+         id   = none :: none | integer(),
+         wx   = none :: none | wx:wx_object()}).
 
 
--type state() :: term().
+-type state()  :: term().
+-type button() :: #button{}.
 
 
 %%% Interface functions
@@ -64,19 +53,6 @@
 
 show(Terms) ->
     wx_object:cast(?MODULE, {show, Terms}).
-
-
--spec stat([Element]) -> ok
-    when Element :: {height,     non_neg_integer()}
-                  | {difficulty, non_neg_integer()}
-                  | {sync,       {boolean(), float()}}
-                  | {peers,      {non_neg_integer(),
-                                  non_neg_integer(),
-                                  non_neg_integer()}}
-                  | {txpool,     non_neg_integer()}.
-
-stat(Elements) ->
-    wx_object:cast(?MODULE, {stat, Elements}).
 
 
 ask_install() ->
@@ -96,27 +72,30 @@ init(BuildMeta) ->
     Frame = wxFrame:new(Wx, ?wxID_ANY, "ÆL"),
     MainSz = wxBoxSizer:new(?wxVERTICAL),
 
+    ButtonConf =
+        [{"Configurator",     ael_v_conf},
+         {"Run Local Node",   ael_v_node},
+         {"Developer Tool",   ael_v_dev},
+         {"Chain Explorer",   ael_v_chain},
+         {"Network Explorer", ael_v_network},
+         {"Mempool Explorer", ael_v_mempool}],
+
     MakeButton =
-        fun(Label) ->
+        fun({Label, Mod}) ->
             Button = wxButton:new(Frame, ?wxID_ANY, [{label, Label}]),
             ID = wxButton:getId(Button),
             _ = wxSizer:add(MainSz, Button, zxw:flags(base)),
-            {Button, ID}
+            #button{name = Mod, id = ID, wx = Button}
         end,
-    {ConfBn,  ConfID}  = MakeButton("Configurator"),
-    {NodeBn,  NodeID}  = MakeButton("Run Local Node"),
-    {ChainBn, ChainID} = MakeButton("Chain Explorer"),
-    {DevBn,   DevID}   = MakeButton("Developer Tool"),
-    {NetBn,   NetID}   = MakeButton("Network Explorer"),
-    {MemBn,   MemID}   = MakeButton("Mempool Explorer"),
+    Buttons = lists:map(MakeButton, ButtonConf),
 %   _ = wxButton:disable(ConfBn),
 
     TextStyle = [{style, ?wxTE_MULTILINE}],
-    TextCt = wxTextCtrl:new(Window, ?wxID_ANY, TextStyle),
-    _ = wxSizer:add(MainSz, TextCt, zxw:flags(wide)),
+    Console = wxTextCtrl:new(Frame, ?wxID_ANY, TextStyle),
+    _ = wxSizer:add(MainSz, Console, zxw:flags(wide)),
 
     _ = wxFrame:setSizer(Frame, MainSz),
-    _ = wxSizer:layout(FrameSz),
+    _ = wxSizer:layout(MainSz),
 
     ok = wxFrame:connect(Frame, close_window),
     ok = wxFrame:connect(Frame, command_button_clicked),
@@ -129,19 +108,11 @@ init(BuildMeta) ->
                 Format = "Current build: AE ~s built with ERTS ~s.~n",
                 io_lib:format(Format, [AEVer, ERTSVer]);
             none ->
-                ok = wxButton:setLabel(NodeBn, "Build Node"),
                 "No AE node is currently built.\n"
         end,
-    ok = wxTextCtrl:appendText(TextCt, BuildString),
+    ok = wxTextCtrl:appendText(Console, BuildString),
 
-    State = #s{frame      = Frame,
-               conf_bn    = ConfBn,  conf_id    = ConfID,
-               node_bn    = NodeBn,  node_id    = NodeID,
-               chain_bn   = ChainBn, chain_id   = ChainID,
-               dev_bn     = DevBn,   dev_id     = DevID,
-               network_bn = NetBn,   network_id = NetID,
-               mempool_bn = MemBn,   mempool_id = MemID,
-               text_ct    = TextCt},
+    State = #s{frame = Frame, buttons = Buttons, console = Console},
     {Frame, State}.
 
 
@@ -174,9 +145,6 @@ handle_call(Unexpected, From, State) ->
 handle_cast({show, Terms}, State) ->
     NewState = do_show(Terms, State),
     {noreply, NewState};
-handle_cast({stat, Elements}, State) ->
-    NewState = lists:foldl(fun do_stat/2, State, Elements),
-    {noreply, NewState};
 handle_cast(Unexpected, State) ->
     ok = tell(warning, "Unexpected cast: ~tp~n", [Unexpected]),
     {noreply, State}.
@@ -204,19 +172,13 @@ handle_info(Unexpected, State) ->
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
 
 handle_event(#wx{id = ID, event = #wxCommand{type = command_button_clicked}},
-             State = #s{conf_id = ConfID, node_id    = NodeID, chain_id   = ChainID,
-                        dev_id  = DevID,  network_id = NetID,  mempool_id = MemID}) ->
-    NewState =
-        case ID of
-            ConfID     -> show_conf(State);
-            NodeID     -> show_node(State);
-            ChainID    -> show_chain(State);
-            DevID      -> show_dev(State);
-            NetID      -> show_network(State);
-            MemID      -> show_mempool(State);
-            ?wxID_EXIT -> close(State)
+             State = #s{buttons = Buttons}) ->
+    ok =
+        case lists:keyfind(ID, #button.id, Buttons) of
+            #button{name = Name} -> ael_con:show_ui(Name);
+            false                -> ok
         end,
-    {noreply, NewState};
+    {noreply, State};
 handle_event(#wx{event = #wxClose{}}, State) ->
     NewState = close(State),
     {noreply, NewState};
@@ -276,14 +238,14 @@ ask_yes_no(Frame, Message) ->
 
 
 
-do_show(Terms, State = #s{text_ct = TextC}) ->
+do_show(Terms, State = #s{console = Console}) ->
     ok = log(info, Terms),
     String =
         case io_lib:deep_char_list(Terms) of
             true  -> Terms;
             false -> io_lib:format("~tw~n", [Terms])
         end,
-    ok = wxTextCtrl:appendText(TextC, unicode:characters_to_list(String)),
+    ok = wxTextCtrl:appendText(Console, unicode:characters_to_list(String)),
     State.
 
 
@@ -292,8 +254,8 @@ conf(State) ->
     State.
 
 
-run_node(State = #s{text_ct = TextC}) ->
-    ok = wxTextCtrl:appendText(TextC, "NODE button clicked!\n"),
+run_node(State = #s{console = Console}) ->
+    ok = wxTextCtrl:appendText(Console, "NODE button clicked!\n"),
     ok = ael_con:run_node(),
     State.
 
