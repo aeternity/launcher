@@ -33,7 +33,6 @@
          height      = 0            :: non_neg_integer(),
          sync        = {true, 0.1}  :: {true, float()} | false,
          height_ct   = none         :: none | wx:wx_object(),
-         sync_ct     = none         :: none | wx:wx_object(),
          peer_ct     = none         :: none | wx:wx_object(),
          diff_ct     = none         :: none | wx:wx_object(),
          txpool_ct   = none         :: none | wx:wx_object(),
@@ -110,16 +109,6 @@ init(none) ->
     TxPoolGrID = ael_graph:get_wx_id(TxPoolGr),
     _ = wxStaticBoxSizer:add(TxPoolSz, TxPoolGrSz, zxw:flags(wide)),
 
-    SyncBx = wxStaticBox:new(Window, ?wxID_ANY, "Sync"),
-    SyncSz = wxStaticBoxSizer:new(SyncBx, ?wxVERTICAL),
-    SyncCt = wxTextCtrl:new(SyncBx, ?wxID_ANY, StatOpts),
-    _ = wxStaticBoxSizer:add(SyncSz, SyncCt, zxw:flags(base)),
-    SyncGrSz = wxBoxSizer:new(?wxVERTICAL),
-    SyncGr = ael_graph:new(SyncBx, SyncGrSz, "X", "Y"),
-    true = wxSizer:setItemMinSize(SyncGrSz, 0, {150, 150}),
-    SyncGrID = ael_graph:get_wx_id(SyncGr),
-    _ = wxStaticBoxSizer:add(SyncSz, SyncGrSz, zxw:flags(wide)),
-
     DiffBx = wxStaticBox:new(Window, ?wxID_ANY, "Difficulty"),
     DiffSz = wxStaticBoxSizer:new(DiffBx, ?wxVERTICAL),
     DiffCt = wxTextCtrl:new(DiffBx, ?wxID_ANY, StatOpts),
@@ -145,7 +134,6 @@ init(none) ->
     _ = wxBoxSizer:add(StatSz,  TxPoolSz, [{flag, ?wxEXPAND}, {proportion, 1}]),
     _ = wxBoxSizer:add(StatSz,  DiffSz,   [{flag, ?wxEXPAND}, {proportion, 1}]),
     _ = wxBoxSizer:add(StatSz,  PeerSz,   [{flag, ?wxEXPAND}, {proportion, 1}]),
-    _ = wxBoxSizer:add(StatSz,  SyncSz,   [{flag, ?wxEXPAND}, {proportion, 1}]),
 
     _ = wxSizer:add(MainSz, ButtSz, zxw:flags(base)),
     _ = wxSizer:add(MainSz, StatSz, zxw:flags(base)),
@@ -161,21 +149,18 @@ init(none) ->
     true = wxFrame:show(Frame),
     {ok, DiffGrI} = ael_graph:show(DiffGr),
     {ok, PeerGrI} = ael_graph:show(PeerGr),
-    {ok, SyncGrI} = ael_graph:show(SyncGr),
     {ok, TxPoolGrI} = ael_graph:show(TxPoolGr),
     Graphs =
         {#{pool => TxPoolGrID,
            diff => DiffGrID,
-           peer => PeerGrID,
-           sync => SyncGrID},
+           peer => PeerGrID},
          #{TxPoolGrID => TxPoolGrI,
            DiffGrID   => DiffGrI,
-           PeerGrID   => PeerGrI,
-           SyncGrID   => SyncGrI}},
+           PeerGrID   => PeerGrI}},
     State = #s{frame     = Frame,
                conf_bn   = ConfBn,   node_bn = NodeBn,
-               height_ct = HeightCt, sync_ct = SyncCt,
-               diff_ct   = DiffCt,   peer_ct = PeerCt, txpool_ct = TxPoolCt,
+               height_ct = HeightCt, diff_ct   = DiffCt,
+               peer_ct = PeerCt,     txpool_ct = TxPoolCt,
                graphs    = Graphs},
     {Frame, State}.
 
@@ -340,16 +325,10 @@ ask_yes_no(Frame, Message) ->
     ok = wxMessageDialog:destroy(Modal),
     Response.
 
-
 do_stat({height, Now},
-        State = #s{sync = {true, Complete}, height_ct = HeightCt, height = OldTop,
-                   graphs = Graphs}) ->
-    Top = calc_top(Now, Complete),
-    Diff = OldTop - Top,
-    NewGraphs = update_graph(sync, Graphs, Diff),
-    Text = unicode:characters_to_list([integer_to_list(Now), "/", integer_to_list(Top)]),
-    ok = wxTextCtrl:changeValue(HeightCt, Text),
-    State#s{height = Now, graphs = NewGraphs};
+        State = #s{sync = {true, Complete}, height_ct = HeightCt}) ->
+    ok = wxTextCtrl:changeValue(HeightCt, sync_format(Now, Complete)),
+    State#s{height = Now};
 do_stat({height, Now}, State = #s{sync = false, height_ct = HeightCt}) ->
     ok = wxTextCtrl:changeValue(HeightCt, integer_to_list(Now)),
     State;
@@ -359,23 +338,13 @@ do_stat({difficulty, Rating},
     ok = wxTextCtrl:changeValue(DiffCt, integer_to_list(Rating)),
     State#s{graphs = NewGraphs};
 do_stat({sync, Sync = {true, Complete}},
-        State = #s{height = Now, height_ct = HeightCt, sync_ct = SyncCt,
-                   graphs = Graphs}) ->
-    Top = calc_top(Now, Complete),
-    NewGraphs = update_graph(sync, Graphs, 0),
-    Text = unicode:characters_to_list([integer_to_list(Now), "/", integer_to_list(Top)]),
-    ok = wxTextCtrl:changeValue(HeightCt, Text),
-    SyncText = io_lib:format("~.2f%", [Complete]),
-    ok = wxTextCtrl:changeValue(SyncCt, SyncText),
-    State#s{sync = Sync, graphs = NewGraphs};
-do_stat({sync, {false, Complete}},
-        State = #s{height = Now, height_ct = HeightCt, sync_ct = SyncCt,
-                   graphs = Graphs}) ->
-    NewGraphs = update_graph(sync, Graphs, 0),
+        State = #s{height = Now, height_ct = HeightCt}) ->
+    ok = wxTextCtrl:changeValue(HeightCt, sync_format(Now, Complete)),
+    State#s{sync = Sync};
+do_stat({sync, {false, _}},
+        State = #s{height = Now, height_ct = HeightCt}) ->
     ok = wxTextCtrl:changeValue(HeightCt, integer_to_list(Now)),
-    SyncText = io_lib:format("~.2f%", [Complete]),
-    ok = wxTextCtrl:changeValue(SyncCt, SyncText),
-    State#s{sync = false, graphs = NewGraphs};
+    State#s{sync = false};
 do_stat({peers, {PeerCount, PeerConnI, PeerConnO}},
         State = #s{peer_ct = PeerCt, graphs = Graphs}) ->
     Figures =
@@ -391,6 +360,13 @@ do_stat({txpool, Count},
     NewGraphs = update_graph(pool, Graphs, Count),
     ok = wxTextCtrl:changeValue(TxPoolCt, integer_to_list(Count)),
     State#s{graphs = NewGraphs}.
+
+sync_format(Now, Complete) ->
+    Top = calc_top(Now, Complete),
+    Format =
+        [integer_to_list(Now), "/", integer_to_list(Top),
+         " (Syncing: ", io_lib:format("~.2f%", [Complete]), ")"],
+    unicode:characters_to_list(Format).
 
 calc_top(Now, Complete) when Complete > 0 ->
     trunc((Now * 100) / Complete);
