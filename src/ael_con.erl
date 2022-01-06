@@ -1,7 +1,9 @@
 %%% @doc
 %%% ÆL Controller
 %%%
-%%% This process is a in charge of maintaining the program's state.
+%%% This process is a in charge of maintaining the program's core state, coordination and
+%%% commuication among interface processes, and any other state that is globally depended
+%%% upon. The closest thing to a GUI companion to the controller is the ael_gui process.
 %%% @end
 
 -module(ael_con).
@@ -14,7 +16,7 @@
 % Node GUI interface
 -export([run_node/0, build_complete/2]).
 % Conf GUI interface
--export([show_conf/0, show_editor/1]).
+-export([show_ui/1]).
 % File manipulation
 -export([read_conf/1, save_conf/1, drop_conf/1, var/0]).
 % gen_server
@@ -29,14 +31,26 @@
 
 
 -record(s,
-        {window   = none :: none | wx:wx_object(),
-         node     = none :: none | stopped | running | {building, pid(), pid()},
-         build    = none :: none | {AEVer :: string(), ERTSVer :: string()},
-         conf_con = none :: none | wx:wx_object(),
-         conf_mon = none :: none | reference(),
-         manifest = []   :: [ael_conf:meta()]}).
+        {window     = none :: none | wx:wx_object(),
+         node       = none :: none | stopped | running | {building, pid(), pid()},
+         build      = none :: none | {AEVer :: string(), ERTSVer :: string()},
+         tasks      = []   :: [ui()],
+         manifest   = []   :: [ael_conf:meta()]}).
 
--type state() :: #s{}.
+-record(ui,
+        {name = none :: none | ui_name(),
+         pid  = none :: none | pid(),
+         wx   = none :: none | wx:wx_object(),
+         mon  = none :: none | reference()}).
+
+-type state()   :: #s{}.
+-type ui_name() :: ael_v_conf
+                 | ael_v_node
+                 | ael_v_chain
+                 | ael_v_dev
+                 | ael_v_network
+                 | ael_v_mempool.
+-type ui()      :: #ui{}.
 
 
 
@@ -56,18 +70,11 @@ build_complete(AEVer, ERTSVer) ->
     gen_server:cast(?MODULE, {build_complete, self(), AEVer, ERTSVer}).
 
 
--spec show_conf() -> ok.
+-spec show_ui(Name) -> ok
+    when Name :: ui_name().
 
-show_conf() ->
-    gen_server:cast(?MODULE, show_conf).
-
-
--spec show_editor(ConfMeta) -> Win
-    when ConfMeta :: ael_conf:meta(),
-         Win      :: wx:wx_object().
-
-show_editor(ConfMeta) ->
-    gen_server:call(?MODULE, {show_editor, ConfMeta}).
+show_ui(Name) ->
+    gen_server:cast(?MODULE, {show_ui, Name}).
 
 
 -spec read_conf(Index) -> {ok, map()} | error
@@ -163,8 +170,8 @@ handle_call(Unexpected, From, State) ->
 %% The gen_server:handle_cast/2 callback.
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_cast-2
 
-handle_cast(show_conf, State) ->
-    NewState = do_show_conf(State),
+handle_cast({show_ui, Name}, State) ->
+    NewState = do_show_ui(Name, State),
     {noreply, NewState};
 handle_cast({save_conf_meta, Entries}, State) ->
     ok = do_save_conf_meta(Entries),
@@ -199,12 +206,15 @@ handle_info(Unexpected, State) ->
     {noreply, State}.
 
 
-handle_down(Mon, _, _, State = #s{conf_mon = Mon}) ->
-    State#s{conf_con = none, conf_mon = none};
-handle_down(Mon, PID, Info, State = #s{conf_mon = Mon}) ->
-    Unexpected = {'DOWN', Mon, process, PID, Info},
-    ok = log(warning, "Unexpected info: ~tp~n", [Unexpected]),
-    State.
+handle_down(Mon, PID, Info, State = #s{tasks = Tasks}) ->
+    case lists:keytake(Mon, #ui.mon, Tasks) of
+        {value, #ui{}, NewTasks} ->
+            State#s{tasks = NewTasks};
+        false ->
+            Unexpected = {'DOWN', Mon, process, PID, Info},
+            ok = log(warning, "Unexpected info: ~tp~n", [Unexpected]),
+            State
+    end.
 
 
 %% @private
@@ -221,24 +231,32 @@ terminate(Reason, State) ->
 
 
 
-%%% Implementation noise
+%%% Doer functions
 
-do_show_conf(State = #s{conf_con = none}) ->
+do_show_ui(Name, State = #s{tasks = Tasks}) ->
+    case lists:keyfind(Name, #ui.name, Tasks) of
+        #ui{wx = Win} ->
+            ok = Name:to_front(Win),
+            State;
+        false ->
+            Conf = init_args(Name, State),
+            Win = Name:start_link(Conf),
+            PID = wx_object:get_pid(Win),
+            Mon = monitor(process, PID),
+            UI = #ui{name = Name, pid = PID, wx = Win, mon = Mon},
+            State#s{tasks = [UI | Tasks]}
+    end.
+
+init_args(ael_v_conf, _) ->
     MetaPath = conf_meta_path(),
     ok = filelib:ensure_dir(MetaPath),
     Desc = fun(A, B) -> element(2, A) > element(2, B) end,
-    Manifest =
-        case file:consult(MetaPath) of
-            {ok, Entries}   -> lists:sort(Desc, Entries);
-            {error, enoent} -> []
-        end,
-    Win = ael_conf_con:start_link(Manifest),
-    PID = wx_object:get_pid(Win),
-    Mon = monitor(process, PID),
-    State#s{conf_con = Win, conf_mon = Mon};
-do_show_conf(State) ->
-    ok = ael_conf_con:to_front(),
-    State.
+    case file:consult(MetaPath) of
+        {ok, Entries}   -> lists:sort(Desc, Entries);
+        {error, enoent} -> []
+    end;
+init_args(_, _) ->
+    none.
 
 
 do_save_conf_meta(Entries) ->
@@ -257,7 +275,9 @@ do_run_node(State) ->
 do_build_complete(BPID, AEVer, ERTSVer, State = #s{node = {building, BPID, _}}) ->
     Meta = {build, {AEVer, ERTSVer}},
     ok = zx_lib:write_terms(build_meta_path(), [Meta]),
-    {ok, _} = application:ensure_all_started(aecore),
+    {ok, Started} = application:ensure_all_started(app_ctrl),
+    ok = ael_gui:show(io_lib:format("Prestarted: ~p.~n", [Started])),
+    {ok, _} = application:ensure_all_started(aesync),
     ok = ael_monitor:start_poll(1000),
     State#s{node = stopped};
 do_build_complete(_, _, _, State) ->
