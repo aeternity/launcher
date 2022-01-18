@@ -42,11 +42,10 @@
          label_x = ""   :: string(),
          label_y = ""   :: string(),
          history = #h{} :: [entry()],
-%        history = history(500) :: [entry()],
          tpin    = none :: none | pin(),
          rpin    = none :: none | pin(),
          tx      =  0.0 :: number(),
-         ty      = -0.6 :: number(),
+         ty      = -0.7 :: number(),
          rx      =  0.0 :: number(),
          ry      =  0.0 :: number()}).
 
@@ -59,9 +58,8 @@
 -type entry()   :: {erlang:timestamp(), number()}.
 
 
-%history(N) ->
-%    Entries = [{C, rand:uniform()} || C <- lists:seq(1, N)],
-%    lists:foldl(fun add_entry/2, #h{}, Entries).
+
+%%% Interface
 
 -spec new(Parent, Sizer, LabelX, LabelY) -> Graph
     when Parent :: wx:wx_object(),
@@ -297,29 +295,30 @@ grid(N, Max) when N =< Max ->
     ok = gl:vertex3f(   N,  0.0, -Max),
     ok = gl:vertex3f( Max,  0.0,    N),
     ok = gl:vertex3f(-Max,  0.0,    N),
-    ok = gl:vertex3f( 0.0,    N,  Max),
-    ok = gl:vertex3f( 0.0,    N, -Max),
-    ok = gl:vertex3f( 0.0,  Max,    N),
-    ok = gl:vertex3f( 0.0, -Max,    N),
     ok = gl:vertex3f( Max,    N,  0.0),
     ok = gl:vertex3f(-Max,    N,  0.0),
     ok = gl:vertex3f(   N,  Max,  0.0),
     ok = gl:vertex3f(   N, -Max,  0.0),
+%   ok = gl:vertex3f( 0.0,    N,  Max),
+%   ok = gl:vertex3f( 0.0,    N, -Max),
+%   ok = gl:vertex3f( 0.0,  Max,    N),
+%   ok = gl:vertex3f( 0.0, -Max,    N),
     grid(N + 0.5, Max);
 grid(_, _) ->
     ok.
 
 bars(History = #h{entries = Entries, min = Min, max = Max}) ->
-    ok = bars(Entries, Min, Max, 2.5),
-    History.
+    Offset = 3.0,
+    NewEntries = bars(Entries, Min, Max, Offset, -Offset),
+    History#h{entries = NewEntries}.
 
-bars([{_, Value} | Rest], Min, Max, Offset) ->
+bars([E = {_, Value} | Rest], Min, Max, Offset, Limit) when Offset > Limit ->
     Scaled = scale(Value, Min, Max),
-    ok = gl:vertex3f(Offset, 0.0, 0.0),
-    ok = gl:vertex3f(Offset,   Scaled, 0.0),
-    bars(Rest, Min, Max, Offset - 0.01);
-bars([], _, _,  _) ->
-    ok.
+    ok = gl:vertex3f(Offset,    0.0, 0.01),
+    ok = gl:vertex3f(Offset, Scaled, 0.01),
+    [E | bars(Rest, Min, Max, Offset - 0.01, Limit)];
+bars(_, _, _, _, _) ->
+    [].
 
 scale(Value, Min, Max) ->
     Magnitude = max(abs(Min), abs(Max)),

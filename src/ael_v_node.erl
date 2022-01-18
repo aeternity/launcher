@@ -140,7 +140,7 @@ init(none) ->
     _ = wxScrolledWindow:setSizerAndFit(Window, MainSz),
     ok = wxScrolledWindow:setScrollRate(Window, 0, 5),
     _ = wxFrame:setSizer(Frame, FrameSz),
-    ok = wxFrame:setSize(Frame, {500, 900}),
+    ok = wxFrame:setSize(Frame, {510, 700}),
     _ = wxSizer:layout(FrameSz),
 
     ok = wxFrame:connect(Frame, close_window),
