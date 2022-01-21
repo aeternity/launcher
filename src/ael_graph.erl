@@ -45,7 +45,7 @@
          tpin    = none :: none | pin(),
          rpin    = none :: none | pin(),
          tx      =  0.0 :: number(),
-         ty      = -0.7 :: number(),
+         ty      = -0.9 :: number(),
          rx      =  0.0 :: number(),
          ry      =  0.0 :: number()}).
 
@@ -275,7 +275,7 @@ draw(Graph = #g{sizer = Sizer, canvas = Canvas, history = History,
     ok = gl:rotatef(RY, 1.0, 0.0, 0.0),
     ok = gl:rotatef(RX, 0.0, 1.0, 0.0),
     ok = gl:'begin'(?GL_LINES),
-    ok = grid(4.0),
+    ok = grid(3.0),
     ok = gl:'end'(),
     ok = gl:'begin'(?GL_LINES),
     ok = gl:color3f(1.0, 0.0, 1.0),
@@ -291,18 +291,20 @@ draw(Graph = #g{sizer = Sizer, canvas = Canvas, history = History,
 grid(Size) -> grid(-Size, Size).
 
 grid(N, Max) when N =< Max ->
-    ok = gl:vertex3f(   N,  0.0,  Max),
-    ok = gl:vertex3f(   N,  0.0, -Max),
-    ok = gl:vertex3f( Max,  0.0,    N),
-    ok = gl:vertex3f(-Max,  0.0,    N),
-    ok = gl:vertex3f( Max,    N,  0.0),
-    ok = gl:vertex3f(-Max,    N,  0.0),
-    ok = gl:vertex3f(   N,  Max,  0.0),
-    ok = gl:vertex3f(   N, -Max,  0.0),
-%   ok = gl:vertex3f( 0.0,    N,  Max),
-%   ok = gl:vertex3f( 0.0,    N, -Max),
-%   ok = gl:vertex3f( 0.0,  Max,    N),
-%   ok = gl:vertex3f( 0.0, -Max,    N),
+    ok = gl:vertex3f(N, 0.0,  Max),
+    ok = gl:vertex3f(N, 0.0, 0.0),
+    ok = gl:vertex3f(N, Max, 0.0),
+    ok = gl:vertex3f(N, 0.0, 0.0),
+    ok =
+        case N >= 0.0 of
+            true ->
+                ok = gl:vertex3f( Max, 0.0,   N),
+                ok = gl:vertex3f(-Max, 0.0,   N),
+                ok = gl:vertex3f( Max,   N, 0.0),
+                ok = gl:vertex3f(-Max,   N, 0.0);
+            false ->
+                ok
+        end,
     grid(N + 0.5, Max);
 grid(_, _) ->
     ok.

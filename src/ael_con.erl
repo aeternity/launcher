@@ -14,7 +14,7 @@
 
 -behavior(gen_server).
 % Node GUI interface
--export([run_node/0, build_complete/2]).
+-export([run_node/0, stop_ae/0, build_complete/4]).
 % Conf GUI interface
 -export([show_ui/1]).
 % File manipulation
@@ -32,8 +32,11 @@
 
 -record(s,
         {window     = none :: none | wx:wx_object(),
-         node       = none :: none | stopped | running | {building, pid(), pid()},
+         node       = none :: none | stopped | running | {building, pid()},
+         base_dir   = none :: none | file:filename(),
          build      = none :: none | {AEVer :: string(), ERTSVer :: string()},
+         deps       = []   :: [dep()],
+         loaded     = []   :: [atom()],
          tasks      = []   :: [ui()],
          manifest   = []   :: [ael_conf:meta()]}).
 
@@ -51,6 +54,7 @@
                  | ael_v_network
                  | ael_v_mempool.
 -type ui()      :: #ui{}.
+-type dep()     :: {AppName :: atom(), Version :: string(), RelPath :: string()}.
 
 
 
@@ -59,15 +63,23 @@
 -spec run_node() -> ok.
 
 run_node() ->
-    gen_server:cast(?MODULE, run_node).
+    gen_server:call(?MODULE, run_node).
 
 
--spec build_complete(AEVer, ERTSVer) -> ok
-    when AEVer   :: string(),
-         ERTSVer :: string().
+-spec stop_ae() -> ok.
 
-build_complete(AEVer, ERTSVer) ->
-    gen_server:cast(?MODULE, {build_complete, self(), AEVer, ERTSVer}).
+stop_ae() ->
+    gen_server:cast(?MODULE, stop_ae).
+
+
+-spec build_complete(AEVer, ERTSVer, BaseDir, Deps) -> ok
+    when AEVer      :: string(),
+         ERTSVer    :: string(),
+         BaseDir    :: file:filename(),
+         Deps       :: [dep()].
+
+build_complete(AEVer, ERTSVer, BaseDir, Deps) ->
+    gen_server:cast(?MODULE, {build_complete, self(), {AEVer, ERTSVer, BaseDir, Deps}}).
 
 
 -spec show_ui(Name) -> ok
@@ -157,6 +169,9 @@ get_build_meta() ->
 handle_call({show_editor, ConfMeta}, _, State) ->
     Win = ael_conf:start_link(ConfMeta),
     {reply, Win, State};
+handle_call(run_node, _, State) ->
+    {Response, NewState} = do_run_node(State),
+    {reply, Response, NewState};
 handle_call(Unexpected, From, State) ->
     ok = log(warning, "Unexpected call from ~tp: ~tp~n", [From, Unexpected]),
     {noreply, State}.
@@ -176,11 +191,11 @@ handle_cast({show_ui, Name}, State) ->
 handle_cast({save_conf_meta, Entries}, State) ->
     ok = do_save_conf_meta(Entries),
     {noreply, State};
-handle_cast(run_node, State) ->
-    NewState = do_run_node(State),
+handle_cast({build_complete, Builder, Meta}, State) ->
+    NewState = do_build_complete(Builder, Meta, State),
     {noreply, NewState};
-handle_cast({build_complete, Builder, AEVer, ERTSVer}, State) ->
-    NewState = do_build_complete(Builder, AEVer, ERTSVer, State),
+handle_cast(stop_ae, State) ->
+    NewState = do_stop_ae(State),
     {noreply, NewState};
 handle_cast(stop, State) ->
     ok = log(info, "Received a 'stop' message."),
@@ -247,6 +262,7 @@ do_show_ui(Name, State = #s{tasks = Tasks}) ->
             State#s{tasks = [UI | Tasks]}
     end.
 
+
 init_args(ael_v_conf, _) ->
     MetaPath = conf_meta_path(),
     ok = filelib:ensure_dir(MetaPath),
@@ -266,22 +282,148 @@ do_save_conf_meta(Entries) ->
 
 do_run_node(State = #s{node = none, build = BuildMeta}) ->
     {ok, BPID} = ael_builder:start_link(BuildMeta),
-%   GPID = spawn_link(ael_builder_gui, start, []),
-%   State#s{node = {building, BPID, GPID}};
-    State#s{node = {building, BPID, none}};
+    {ok, State#s{node = {building, BPID}}};
+do_run_node(State = #s{node = stopped}) ->
+    NewState = start_node(State),
+    {ok, NewState};
 do_run_node(State) ->
+    {running, State}.
+
+
+do_stop_ae(State = #s{node = running, loaded = Apps}) ->
+    ok = ael_monitor:stop_poll(),
+    Ignore =
+        [asn1,
+         xmerl,
+         public_key,
+         compiler,
+         crypto,
+         syntax_tools,
+         observer,
+         sasl,
+         runtime_tools],
+    ToRemove = Apps -- Ignore,
+    AppsInOrder = [aecore | lists:delete(aecore, ToRemove)],
+    ok = lists:foreach(fun remove/1, AppsInOrder),
+    State#s{node = stopped, loaded = []};
+do_stop_ae(State) ->
     State.
 
-do_build_complete(BPID, AEVer, ERTSVer, State = #s{node = {building, BPID, _}}) ->
+remove(App) ->
+    Format =
+        case application:stop(App) of
+            ok                          -> "Stopped: ~tp~n";
+            {error, {not_started, App}} -> "Unloaded: ~tp~n"
+        end,
+    Message = io_lib:format(Format, [App]),
+    ok = application:unload(App),
+    ael_gui:show(Message).
+
+
+do_build_complete(BPID,
+                  {AEVer, ERTSVer, BaseDir, Deps},
+                  State = #s{node = {building, BPID}}) ->
     Meta = {build, {AEVer, ERTSVer}},
     ok = zx_lib:write_terms(build_meta_path(), [Meta]),
+    start_node(State#s{base_dir = BaseDir, build = {AEVer, ERTSVer}, deps = Deps});
+do_build_complete(_, _, State) ->
+    State.
+
+
+%%% TODO: Make this dependent on the configuration chosen
+start_node(State = #s{base_dir = BaseDir, deps = Deps}) ->
+    ok = maybe_move_files(BaseDir),
+    Apps = add_libs(BaseDir, Deps),
     {ok, Started} = application:ensure_all_started(app_ctrl),
     ok = ael_gui:show(io_lib:format("Prestarted: ~p.~n", [Started])),
     {ok, _} = application:ensure_all_started(aesync),
     ok = ael_monitor:start_poll(1000),
-    State#s{node = stopped};
-do_build_complete(_, _, _, State) ->
-    State.
+    State#s{node = running, loaded = Apps}.
+
+maybe_move_files(BaseDir) ->
+    case filelib:is_file(filename:join(ael_con:var(), "data")) of
+        true ->
+            ok = ael_gui:show("No need to move files to data/\n");
+        false ->
+            ok = ael_gui:show("Populating data/\n"),
+            ok = copy_silly_files(BaseDir),
+            ok = run_once_out_of_context(BaseDir),
+            ok = move_delicious_data_bits(BaseDir)
+    end.
+
+copy_silly_files(BaseDir) ->
+    NonsenseThatShouldBeOptional = ["REVISION", "VERSION"],
+    AE_Home = ael_con:var(),
+    Copy =
+        fun(F) ->
+            Src = filename:join(BaseDir, F),
+            Dst = filename:join(AE_Home, F),
+            {ok, _} = file:copy(Src, Dst)
+        end,
+    lists:foreach(Copy, NonsenseThatShouldBeOptional).
+
+run_once_out_of_context(BaseDir) ->
+    AE = filename:join(BaseDir, "bin/aeternity"),
+    Command = AE ++ " foreground",
+    Tron = spawn_link(fun() -> stop_the_madness(AE) end),
+    _ = erlang:send_after(60000, Tron, redrum),
+    ael_os:cmd(Command).
+
+stop_the_madness(AE) ->
+    receive redrum -> os:cmd(AE ++ " stop") end.
+
+move_delicious_data_bits(BaseDir) ->
+    Var = ael_con:var(),
+    Files = filelib:wildcard("data/**", BaseDir),
+    Srcs = [filename:join(BaseDir, F) || F <- Files],
+    Dsts = [filename:join(Var, F) || F <- Files],
+    lists:foreach(fun relocate/1, lists:zip(Srcs, Dsts)).
+
+relocate({Src, Dst}) ->
+    ok = filelib:ensure_dir(Dst),
+    case filelib:is_dir(Src) of
+        false ->
+            {ok, _} = file:copy(Src, Dst),
+            ael_gui:show(io_lib:format("Moved ~s to ~s~n", [Src, Dst]));
+        true ->
+            Message = io_lib:format("Making dir ~s~n", [Dst]),
+            ael_gui:show(Message),
+            ok = file:make_dir(Dst)
+    end.
+
+add_libs(BaseDir, Deps) ->
+    ok = file:set_cwd(ael_con:var()),
+    Paths = [filename:join([BaseDir, element(3, Dep), "ebin"]) || Dep <- Deps],
+    ok = code:add_pathsa(Paths),
+    ok = ael_gui:show("Added paths successfully!\n"),
+    PrintableDeps = io_lib:format("~tp", [Deps]),
+    ok = ael_gui:show(PrintableDeps),
+    load_apps(Paths).
+
+load_apps(Paths) ->
+    {ok, [Config]} = file:consult(filename:join(zx:get_home(), "priv/sys.config")),
+    ok = application:set_env(Config),
+    {ok, _} = net_kernel:start(['aeternity@localhost', longnames]),
+    Loaded = [element(1, A) || A <- application:loaded_applications()],
+    Load =
+        fun(Path, AppNames) ->
+            [AppFile] = filelib:wildcard(filename:join(Path, "*.app")),
+            {ok, [AppDesc]} = file:consult(AppFile),
+            AppName = element(2, AppDesc),
+            {Message, NextAppNames} =
+                case lists:member(AppName, Loaded) of
+                    true ->
+                        M = io_lib:format("App ~p already loaded.~n", [AppName]),
+                        {M, AppNames};
+                    false ->
+                        ok = application:load(AppDesc),
+                        M = io_lib:format("Loaded app ~p.~n", [AppName]),
+                        {M, [AppName | AppNames]}
+                end,
+            ok = ael_gui:show(Message),
+            NextAppNames
+        end,
+    lists:foldl(Load, [], Paths).
 
 
 var() ->

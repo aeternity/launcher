@@ -28,7 +28,7 @@
 
 -record(s,
         {frame       = none         :: none | wx:wx_object(),
-         conf_bn     = none         :: none | wx:wx_object(),
+         conf_pk     = none         :: none | wx:wx_object(),
          node_bn     = none         :: none | wx:wx_object(),
          height      = 0            :: non_neg_integer(),
          sync        = {true, 0.1}  :: {true, float()} | false,
@@ -88,11 +88,17 @@ init(none) ->
     ButtSz = wxBoxSizer:new(?wxHORIZONTAL),
     StatSz = wxBoxSizer:new(?wxVERTICAL),
 
-    ConfBn = wxButton:new(Window, ?CONF, [{label, "Configuration"}]),
-    _ = wxButton:disable(ConfBn),
     NodeBn = wxButton:new(Window, ?NODE, [{label, "Run Node"}]),
-    _ = wxSizer:add(ButtSz, ConfBn, zxw:flags(wide)),
-    _ = wxSizer:add(ButtSz, NodeBn, zxw:flags(wide)),
+    ConfNames =
+        ["Mainnet Node",
+         "Testnet Node",
+         "Developer Mode",
+         "Mainnet CPU Miner",
+         "Testnet CPU Miner"],
+    ConfPk = wxChoice:new(Window, ?wxID_ANY, [{choices, ConfNames}]),
+    ok = wxChoice:setSelection(ConfPk, 0),
+    _ = wxSizer:add(ButtSz, NodeBn, zxw:flags(base)),
+    _ = wxSizer:add(ButtSz, ConfPk, zxw:flags(wide)),
 
     StatOpts = [{value, "0"}, {style, ?wxTE_READONLY bor ?wxTE_RIGHT}],
     HeightBx = wxStaticBox:new(Window, ?wxID_ANY, "Height"),
@@ -158,9 +164,9 @@ init(none) ->
            DiffGrID   => DiffGrI,
            PeerGrID   => PeerGrI}},
     State = #s{frame     = Frame,
-               conf_bn   = ConfBn,   node_bn = NodeBn,
+               conf_pk   = ConfPk,   node_bn   = NodeBn,
                height_ct = HeightCt, diff_ct   = DiffCt,
-               peer_ct = PeerCt,     txpool_ct = TxPoolCt,
+               peer_ct   = PeerCt,   txpool_ct = TxPoolCt,
                graphs    = Graphs},
     {Frame, State}.
 
@@ -232,7 +238,6 @@ handle_event(Event = #wx{event = #wxMouse{}}, State) ->
 handle_event(#wx{id = ID, event = #wxCommand{type = command_button_clicked}}, State) ->
     NewState =
         case ID of
-            ?CONF       -> conf(State);
             ?NODE       -> run_node(State);
             ?wxID_EXIT  -> close(State)
         end,
@@ -386,16 +391,14 @@ update_graph(Name, G = {GraphIDs, Graphs}, Diff) ->
     end.
 
 
-conf(State) ->
-    ok = ael_con:show_conf(),
-    State.
-
-
 run_node(State) ->
-    ok = ael_con:run_node(),
-    State.
+    case ael_con:run_node() of
+        ok      -> State;
+        running -> State
+    end.
 
 
 close(State = #s{frame = Frame}) ->
+    ok = ael_con:stop_ae(),
     ok = wxFrame:destroy(Frame),
     State.
