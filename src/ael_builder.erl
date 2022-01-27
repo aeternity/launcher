@@ -106,6 +106,8 @@ great_success(AEVer, ERTS, BaseDir, Deps) ->
     ael_con:build_complete(AEVer, ERTS, BaseDir, Deps).
 
 
+%%% Platform Identification
+
 -spec determine_platform() -> Result
     when Result  :: {OS, OTP, ERTS},
          OS      :: {OSType, Version},

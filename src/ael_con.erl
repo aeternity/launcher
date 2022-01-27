@@ -293,18 +293,26 @@ do_run_node(State) ->
 do_stop_ae(State = #s{node = running, loaded = Apps}) ->
     ok = ael_monitor:stop_poll(),
     Ignore =
-        [asn1,
+        [aecore,
+         asn1,
          xmerl,
          public_key,
          compiler,
          crypto,
          syntax_tools,
          observer,
+         ssl,
          sasl,
-         runtime_tools],
+         runtime_tools,
+         mnesia_rocksdb,
+         rocksdb,
+         mnesia],
     ToRemove = Apps -- Ignore,
-    AppsInOrder = [aecore | lists:delete(aecore, ToRemove)],
+    DoFirst = [aecore],
+    DoLast = [mnesia_rocksdb, rocksdb, mnesia],
+    AppsInOrder = DoFirst ++ ToRemove ++ DoLast,
     ok = lists:foreach(fun remove/1, AppsInOrder),
+    ok = net_kernel:stop(),
     State#s{node = stopped, loaded = []};
 do_stop_ae(State) ->
     State.
