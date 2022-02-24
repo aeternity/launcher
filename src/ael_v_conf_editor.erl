@@ -28,21 +28,6 @@
          conf           = #{}          :: map(),
          meta           = #conf_meta{} :: ael:conf_meta(),
          controls       = #{}          :: map(),
-%        % sync
-%        upnp_enabled   = none         :: wx:wx_object(),
-%        listen_address = none         :: {Addr1 :: wx:wx_object(),
-%                                          Addr2 :: wx:wx_object(), 
-%                                          Addr3 :: wx:wx_object(),
-%                                          Addr4 :: wx:wx_object()},
-%        port           = none         :: wx:wx_object(),
-%        external_port  = none         :: wx:wx_object(),
-%        % mining
-%        autostart      = none         :: wx:wx_object(),
-%        beneficiary    = none         :: wx:wx_object(),
-%        cuckoo         = []           :: [{Exec :: string(), Cores :: integer()}],
-%        % fork_management
-%        network_id     = none         :: wx:wx_object(),
-%        % system
          cores          = 2            :: pos_integer()}).
 
 
@@ -64,6 +49,8 @@ start_link(ConfMeta) ->
 
 
 init({Meta, Conf, Cores}) ->
+    tell(info, "Meta: ~p", [Meta]),
+    tell(info, "Conf: ~p", [Conf]),
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, "Edit Aeternity Node Configuration"),
 
@@ -90,6 +77,7 @@ init({Meta, Conf, Cores}) ->
     _ = wxBoxSizer:add(MainSz, AppWn, zxw:flags(wide)),
     ok = wxSizer:layout(MainSz),
     ok = wxFrame:connect(Frame, close_window),
+    ok = wxFrame:connect(Frame, command_button_clicked),
     ok = wxFrame:connect(Frame, command_menu_selected),
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
@@ -102,10 +90,13 @@ init({Meta, Conf, Cores}) ->
 %%       work put into it.
 build_schema(Schema, Conf, Parent, Sizer) ->
     EditableSections =
-        ["http",
+        ["chain",
+         "fork_management",
+         "http",
          "logging",
          "peers",
-         "regulators",
+%        "regulators",
+%        "mining",
          "system",
          "websocket"],
     Extract =
@@ -115,16 +106,31 @@ build_schema(Schema, Conf, Parent, Sizer) ->
                 Properties = maps:get("properties", HTTP),
                 SubSections = maps:with(["external", "internal"], Properties),
                 TrimmedHTTP = maps:put("properties", SubSections, HTTP),
-                Configured = maps:get("http", Conf, #{}),
+                Configured = maps:get("http", Conf, none),
                 {"http", TrimmedHTTP, Configured};
+            ("chain") ->
+                Chain = maps:get("chain", Schema),
+                Properties = maps:get("properties", Chain),
+                SubSections = maps:with(["persist", "db_path"], Properties),
+                TrimmedChain = maps:put("properties", SubSections, Chain),
+                Configured = maps:get("chain", Conf, none),
+                {"chain", TrimmedChain, Configured};
+            ("fork_management") ->
+                FM = maps:get("fork_management", Schema),
+                Properties = maps:get("properties", FM),
+                SubSections = maps:with(["network_id"], Properties),
+                TrimmedFM = maps:put("properties", SubSections, FM),
+                Configured = maps:get("fork_management", Conf, none),
+                {"chain", TrimmedFM, Configured};
             (Key) ->
-                {Key, maps:get(Key, Schema), maps:get(Key, Conf, #{})}
+                {Key, maps:get(Key, Schema), maps:get(Key, Conf, none)}
         end,
     ToRender = lists:map(Extract, EditableSections),
     Render = fun(Element, Elements) -> render(Element, Parent, Sizer, Elements) end,
     lists:foldl(Render, #{}, ToRender).
 
 render({Key, Scheme, Conf}, Parent, Sizer, Elements) ->
+    tell(info, "Key: ~p, Conf: ~p", [Key, Conf]),
     Title =
         case string:lexemes(Key, "_") of
             ["http"] -> "HTTP";
@@ -132,26 +138,24 @@ render({Key, Scheme, Conf}, Parent, Sizer, Elements) ->
         end,
     Box = wxStaticBox:new(Parent, ?wxID_ANY, Title),
     BoxSz = wxStaticBoxSizer:new(Box, ?wxVERTICAL),
-    tell(info, "Scheme: ~p", [Scheme]),
-    tell(info, "Conf: ~p", [Conf]),
     NewElements =
         case maps:get("type", Scheme) of
             "string" ->
                 ok = set_description(Parent, BoxSz, Scheme),
-                Control = make_control(Parent, Key, Conf, Scheme),
+                Control = make_control(Parent, Conf, Scheme),
                 Checker = text_checker(maps:get("pattern", Scheme, none)),
                 _ = wxStaticBoxSizer:add(BoxSz, Control, zxw:flags(base)),
                 maps:put(Key, {string, Control, Checker}, Elements);
             "integer" ->
                 ok = set_description(Parent, BoxSz, Scheme),
-                Control = make_control(Parent, Key, Conf, Scheme),
+                Control = make_control(Parent, Conf, Scheme),
                 Checker = int_checker(Scheme),
                 _ = wxStaticBoxSizer:add(BoxSz, Control, zxw:flags(base)),
                 maps:put(Key, {integer, Control, Checker}, Elements);
             "boolean" ->
                 ok = set_description(Parent, BoxSz, Scheme),
                 Value =
-                    case determine_value(Key, Conf, Scheme) of
+                    case determine_value(Conf, Scheme) of
                         "" -> false;
                         V  -> V
                     end,
@@ -162,8 +166,12 @@ render({Key, Scheme, Conf}, Parent, Sizer, Elements) ->
             "object" ->
                 Render = fun(P, Ps) -> render(P, Parent, BoxSz, Ps) end,
                 List = maps:to_list(maps:get("properties", Scheme)),
-                Parts = [{K, S, maps:get(K, Conf, #{})} || {K, S} <- List],
-                maps:put(Key, lists:foldl(Render, #{}, Parts), Scheme);
+                Parts =
+                    case Conf =:= none of
+                        true  -> [{K, S, none} || {K, S} <- List];
+                        false -> [{K, S, maps:get(K, Conf, none)} || {K, S} <- List]
+                    end,
+                maps:put(Key, lists:foldl(Render, #{}, Parts), Elements);
             "array" ->
 %               Render = fun(P, Ps) -> render(P, Parent, BoxSz, Ps) end,
 %               maps:put(Key, lists:map(Render, 
@@ -200,8 +208,8 @@ set_description(Parent, Sizer, Scheme) ->
             ok
     end.
 
-make_control(Parent, Key, Conf, Scheme) ->
-    case determine_value(Key, Conf, Scheme) of
+make_control(Parent, Conf, Scheme) ->
+    case determine_value(Conf, Scheme) of
         "" ->
             wxTextCtrl:new(Parent, ?wxID_ANY);
         Value ->
@@ -213,11 +221,8 @@ stringify(V) when is_integer(V) -> integer_to_list(V);
 stringify(V) when is_float(V)   -> float_to_list(V);
 stringify(V)                    -> V.
 
-determine_value(Key, Conf, Scheme) ->
-    case maps:find(Key, Conf) of
-        {ok, V} -> V;
-        error   -> maps:get("default", Scheme, "")
-    end.
+determine_value(none, Scheme) -> maps:get("default", Scheme, "");
+determine_value(Val, _)       -> Val.
 
 
 -spec handle_call(Message, From, State) -> Result
@@ -272,6 +277,10 @@ handle_info(Unexpected, State) ->
 %% The wx_object:handle_event/2 callback.
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
 
+handle_event(#wx{event = #wxCommand{type = command_button_clicked}}, State) ->
+    ok = do_save(State),
+    NewState = close(State),
+    {noreply, NewState};
 handle_event(#wx{event = #wxClose{}}, State) ->
     NewState = close(State),
     {noreply, NewState};
@@ -291,51 +300,43 @@ terminate(Reason, State) ->
 
 %%% Doers
 
-%configure(Conf, State) ->
-%    Defaults = defaults(),
-%    Defaulty =
-%        fun(Section) ->
-%            Default = maps:get(Section, Defaults),
-%            maps:merge(Default, maps:get(Section, Conf, Default))
-%        end,
-%    #{"upnp_enabled"   := UPNP,
-%      "listen_address" := ListenAddress,
-%      "port"           := LocalPort,
-%      "external_port"  := ExternalPort}             = Defaulty("sync"),
-%    #{"autostart"      := AutoStart,
-%      "beneficiary"    := BeneficiaryM,
-%      "cuckoo"         := #{"miners" := Miners}}    = Defaulty("mining"),
-%    #{"network_id"     := NetworkID}                = Defaulty("fork_management"),
-%    [#{"executable" := "mean29-generic",
-%       "extra_args" := "-t " ++ CoresS}] = Miners,
-%    Beneficiary =
-%        case BeneficiaryM =:= unknown of
-%            false -> BeneficiaryM;
-%            true  -> ""
-%        end,
-%    Cores = list_to_integer(CoresS),
-%    MinerTypes =
-%        ["mean29-generic",
-%         "mean29-avx2",
-%         "lean29-generic",
-%         "lean29-avx2"],
-%    ok.
+do_save(#s{controls = Controls}) ->
+    tell(info, "Controls: ~p", [Controls]),
+    Conf = maps:map(fun extract/2, Controls),
+    tell(info, "Conf: ~p", [Conf]).
 
-%defaults() ->
-%    Cores = integer_to_list(core_count() - 1),
-%    #{"sync" =>
-%        #{"upnp_enabled"   => false,
-%          "listen_address" => "0.0.0.0",
-%          "port"           => 3015,
-%          "external_port"  => 3015},
-%      "mining" =>
-%        #{"autostart"   => false,
-%          "beneficiary" => undefined,
-%          "cuckoo"      =>
-%            #{"miners" => [#{"executable" => "mean29-generic",
-%                             "extra_args" => "-t " ++ Cores}]}},
-%      "fork_management" =>
-%        #{"network_id" => "ae_mainnet"}}.
+extract(Key, {string, Control, none}) ->
+    log(info, "Key: ~p, Control: ~p", [Key, Control]),
+    wxTextCtrl:getValue(Control);
+extract(Key, {string, Control, Check}) ->
+    log(info, "Key: ~p, Control: ~p", [Key, Control]),
+    String = wxTextCtrl:getValue(Control),
+    case Check(String) of
+        ok    -> String;
+        error -> ""
+    end;
+extract(Key, {integer, Control, none}) ->
+    log(info, "Key: ~p, Control: ~p", [Key, Control]),
+    try
+        list_to_integer(wxTextCtrl:getValue(Control))
+    catch
+        _:_ -> 0
+    end;
+extract(Key, {integer, Control, Check}) ->
+    log(info, "Key: ~p, Control: ~p", [Key, Control]),
+    try
+        N = list_to_integer(wxTextCtrl:getValue(Control)),
+        true = Check(N),
+        N
+    catch
+        _:_ -> 0
+    end;
+extract(Key, {boolean, Control, none}) ->
+    log(info, "Key: ~p, Control: ~p", [Key, Control]),
+    wxCheckBox:getValue(Control);
+extract(Key, Controls) when is_map(Controls) ->
+    log(info, "Key: ~p, Control: ~p", [Key, Controls]),
+    maps:map(fun extract/2, Controls).
 
 
 close(State = #s{frame = Frame}) ->

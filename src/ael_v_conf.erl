@@ -27,23 +27,13 @@
 -include("$zx_include/zx_logger.hrl").
 -include("ael_conf.hrl").
 
--record(editor,
-        {name = ""   :: string(),
-         win  = none :: wx:wx_object(),
-         pid  = none :: none | pid(),
-         mon  = none :: none | reference()}).
-
 -record(s,
         {frame    = none :: none | wx:wx_object(),
          selector = none :: none | wx:wx_object(),
-         selected = none :: none | non_neg_integer(),
-         manifest = []   :: [meta()],
-         editors  = []   :: [editor()]}).
+         selected = none :: none | non_neg_integer()}).
 
 
 -type state()  :: term().
--type editor() :: #editor{}.
--type meta()   :: #conf_meta{}.
 
 -define(newCONF,    11).
 -define(editCONF,   12).
@@ -72,11 +62,11 @@ set_manifest(Entries) ->
 
 %%% Startup Functions
 
-start_link(Args) ->
-    wx_object:start_link({local, ?MODULE}, ?MODULE, Args, []).
+start_link(Manifest) ->
+    wx_object:start_link({local, ?MODULE}, ?MODULE, Manifest, []).
 
 
-init({Manifest, Cores}) ->
+init(Manifest) ->
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, "Aeternity Configuration"),
 
@@ -105,7 +95,7 @@ init({Manifest, Cores}) ->
     ok = wxFrame:connect(Selector, command_list_item_selected),
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
-    State = #s{frame = Frame, selector = Selector, manifest = Manifest},
+    State = #s{frame = Frame, selector = Selector},
     {Frame, State}.
 
 
@@ -136,8 +126,8 @@ handle_cast(to_front, State = #s{frame = Frame}) ->
     ok = wxFrame:raise(Frame),
     {noreply, State};
 handle_cast({set_manifest, Entries}, State) ->
-    NewState = do_set_manifest(Entries, State),
-    {noreply, NewState};
+    ok = do_set_manifest(Entries, State),
+    {noreply, State};
 handle_cast(Unexpected, State) ->
     ok = tell(warning, "Unexpected cast: ~tp~n", [Unexpected]),
     {noreply, State}.
@@ -151,9 +141,6 @@ handle_cast(Unexpected, State) ->
 %% The gen_server:handle_info/2 callback.
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
 
-handle_info({'DOWN', Mon, process, PID, Info}, State) ->
-    NewState = handle_down(Mon, PID, Info, State),
-    {noreply, NewState};
 handle_info(Unexpected, State) ->
     ok = tell(warning, "Unexpected info: ~tp~n", [Unexpected]),
     {noreply, State}.
@@ -172,18 +159,19 @@ handle_event(#wx{event = #wxList{type = command_list_item_selected,
              State) ->
     {noreply, State#s{selected = Index}};
 handle_event(#wx{event = #wxCommand{type = command_button_clicked}, id = ID}, State) ->
-    NewState =
+    ok =
         case ID of
-            ?newCONF    -> new(State);
+            ?newCONF    -> new();
             ?editCONF   -> edit(State);
             ?dropCONF   -> drop(State);
             ?exportCONF -> export(State)
         end,
-    {noreply, NewState};
+    {noreply, State};
 handle_event(#wx{event = #wxList{type = command_list_item_activated,
                                  itemIndex = Index}},
              State) ->
-    NewState = edit(State = #s{selected = Index}),
+    NewState = State#s{selected = Index},
+    ok = edit(NewState),
     {noreply, NewState};
 handle_event(#wx{event = #wxClose{}}, State) ->
     NewState = close(State),
@@ -191,17 +179,6 @@ handle_event(#wx{event = #wxClose{}}, State) ->
 handle_event(Event, State) ->
     ok = tell(info, "Unexpected event ~tp State: ~tp~n", [Event, State]),
     {noreply, State}.
-
-
-handle_down(Mon, PID, Info, State = #s{editors = Editors}) ->
-    case lists:keytake(Mon, #editor.mon, Editors) of
-        {value, _, NewEditors} ->
-            State#s{editors = NewEditors};
-        false ->
-            Unexpected = {'DOWN', Mon, process, PID, Info},
-            ok = log(warning, "Unexpected info: ~tp~n", [Unexpected]),
-            State
-    end.
 
 
 code_change(_, State, _) ->
@@ -215,63 +192,31 @@ terminate(Reason, State) ->
 
 %%% Doers
 
-% FIXME: Remove editors, cores, etc.
-% Should I generate a fake name for new files? Could be funny... hm...
-new(State = #s{editors = Editors}) ->
-    Editor = open_editor(#conf_meta{}, Cores),
-    State#s{editors = [Editor | Editors]}.
+new() ->
+    ael_con:show_ui({ael_v_conf_editor, ""}).
 
 
-edit(State = #s{manifest = Manifest, editors  = Editors,
-                selector = Selector, selected = Selected,
-                cores    = Cores}) ->
+edit(#s{selector = Selector, selected = Selected}) ->
     Name = wxListCtrl:getItemText(Selector, Selected, [{col, 0}]),
-    case lists:keyfind(Name, #editor.name, Editors) of
-        false ->
-            tell(info, "Selected: ~p", [Selected]),
-            tell(info, "Name: ~p", [Name]),
-            tell(info, "Manifest: ~p", [Manifest]),
-            ConfMeta = lists:keyfind(Name, #conf_meta.name, Manifest),
-            NewEditor = open_editor(ConfMeta, Cores),
-            NewEditors = [NewEditor | Editors],
-            State#s{editors = NewEditors};
-        #editor{pid = PID} ->
-            ok = ael_v_conf:to_front(PID),
-            State
-    end.
+    ael_con:show_ui({ael_v_conf_editor, Name}).
 
 
-open_editor(Meta = #conf_meta{name = Name}, Cores) ->
-    {ok, Conf} = ael_con:read_conf(Name),
-    Win = ael_v_conf_editor:start_link({Meta, Conf, Cores}),
-    PID = wx_object:get_pid(Win),
-    Mon = monitor(process, PID),
-    #editor{name = Name, win = Win, pid = PID, mon = Mon}.
+drop(#s{selected = none}) ->
+    ok;
+drop(#s{selector = Selector, selected = Selected}) ->
+    Name = wxListCtrl:getItemText(Selector, Selected, [{col, 0}]),
+    ael_con:drop_conf(Name).
 
 
-drop(State = #s{selected = none}) ->
-    State;
-drop(State = #s{selector = Selector, selected = Selected, manifest = Manifest}) ->
-    Name = wxListCtrl:getItemText(Selector, Selected, [{col, 1}]),
-    ok = wxListCtrl:deleteItem(Selector, Selected),
-    case lists:keytake(Name, #conf_meta.name, Manifest) of
-        {value, #conf_meta{path = Path}, NewManifest} ->
-            ok = case file:delete(Path) of ok -> ok; {error, enoent} -> ok end,
-            State#s{manifest = NewManifest};
-        false ->
-            State
-    end.
+export(#s{selected = none}) ->
+    ok;
+export(#s{selector = Selector, selected = Selected}) ->
+    Name = wxListCtrl:getItemText(Selector, Selected, [{col, 0}]),
+    tell(info, "Would be exporting ~p", [Name]),
+    ok.
 
 
-export(State = #s{selected = none}) ->
-    State;
-export(State = #s{selector = Selector, selected = Index}) ->
-    ID = list_to_integer(wxListCtrl:getItemText(Selector, Index)),
-    tell(info, "Would be exporting ~p", [ID]),
-    State.
-
-
-do_set_manifest(Entries, State = #s{selector = Selector}) ->
+do_set_manifest(Entries, #s{selector = Selector}) ->
     Items = [{Name, Memo} || #conf_meta{name = Name, memo = Memo} <- Entries],
     true = wxListCtrl:deleteAllItems(Selector),
     ColNums = [0, 1],
@@ -281,8 +226,7 @@ do_set_manifest(Entries, State = #s{selector = Selector}) ->
             Set = fun({Col, Data}) -> wxListCtrl:setItem(Selector, Row, Col, Data) end,
             ok = lists:foreach(Set, lists:zip(ColNums, tuple_to_list(Atts)))
         end,
-    ok = lists:foreach(AddRow, lists:zip(lists:seq(0, length(Items) -1), Items)),
-    State#s{manifest = Entries}.
+    lists:foreach(AddRow, lists:zip(lists:seq(0, length(Items) -1), Items)).
 
 
 close(State = #s{frame = Frame}) ->

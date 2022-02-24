@@ -58,7 +58,7 @@
                    | ael_v_dev
                    | ael_v_network
                    | ael_v_mempool
-                   | {ael_v_conf_editor, Name :: string()}.
+                   | {ael_v_conf_editor, Name :: string() | new}.
 -type ui()        :: #ui{}.
 -type dep()       :: {AppName :: atom(), Version :: string(), RelPath :: string()}.
 
@@ -276,7 +276,11 @@ do_show_ui(Task = {ael_v_conf_editor, Name}, State = #s{tasks = Tasks}) ->
             ok = ael_v_conf_editor:to_front(Win),
             State;
         false ->
-            Win = ael_v_conf_editor:start_link(conf_args(Name, State))
+            Win = ael_v_conf_editor:start_link(conf_args(Name, State)),
+            PID = wx_object:get_pid(Win),
+            Mon = monitor(process, PID),
+            UI = #ui{name = Name, pid = PID, wx = Win, mon = Mon},
+            State#s{tasks = [UI | Tasks]}
     end;
 do_show_ui(Name, State = #s{tasks = Tasks}) ->
     case lists:keyfind(Name, #ui.name, Tasks) of
@@ -291,22 +295,18 @@ do_show_ui(Name, State = #s{tasks = Tasks}) ->
             State#s{tasks = [UI | Tasks]}
     end.
 
-% FIXME: Make the controller start up all windows
-% How should new ones be handled? hm...
+conf_args("", #s{cores = Cores}) ->
+    {#conf_meta{}, #{}, Cores};
 conf_args(Name, #s{manifest = Manifest, cores = Cores}) ->
-    case lists:keyfind(Name, #conf_meta.name, Manifest) of
-        Meta = #conf_meta{path = Path} ->
-            {ok, Bin} = file:read_file(Path),
-            {ok, Conf} = zj:decode(Bin),
-            Win = ael_v_conf_editor:start_link({Meta, Conf, Cores}),
-            
-        false ->
-    
+    Meta = #conf_meta{path = Path} = lists:keyfind(Name, #conf_meta.name, Manifest),
+    {ok, Bin} = file:read_file(Path),
+    {ok, Conf} = zj:decode(Bin),
+    {Meta, Conf, Cores}.
 
 task_args(ael_v_node, #s{manifest = Manifest}) ->
     [Name || #conf_meta{name = Name} <- Manifest];
-task_args(ael_v_conf, #s{manifest = Manifest, cores = Cores}) ->
-    {Manifest, Cores};
+task_args(ael_v_conf, #s{manifest = Manifest}) ->
+    Manifest;
 task_args(_, _) ->
     none.
 

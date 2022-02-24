@@ -78,12 +78,12 @@ init({BuildMeta, Platform}) ->
     MainSz = wxBoxSizer:new(?wxVERTICAL),
 
     ButtonConf =
-        [{"Configurator",     ael_v_conf},
-         {"Run Local Node",   ael_v_node},
-         {"Developer Tool",   ael_v_dev},
-         {"Chain Explorer",   ael_v_chain},
-         {"Network Explorer", ael_v_network},
-         {"Mempool Explorer", ael_v_mempool}],
+        [{"Configurator",        ael_v_conf},
+         {"Run Local Node",      ael_v_node},
+         {"Developer Workbench", ael_v_dev},
+         {"Chain Explorer",      ael_v_chain},
+         {"Network Explorer",    ael_v_network},
+         {"Mempool Explorer",    ael_v_mempool}],
     Disable = [ael_v_dev, ael_v_chain, ael_v_network, ael_v_mempool],
 
     MakeButton =
