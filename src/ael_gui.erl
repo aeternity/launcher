@@ -25,7 +25,7 @@
 -behavior(wx_object).
 -include_lib("wx/include/wx.hrl").
 -export([show/1, ask_install/0]).
--export([start_link/1]).
+-export([start_link/2]).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2,
          handle_event/2, handle_sync_event/3]).
@@ -43,7 +43,7 @@
          wx   = none :: none | wx:wx_object()}).
 
 
--type state()  :: term().
+-type state()  :: #s{}.
 -type button() :: #button{}.
 
 
@@ -62,11 +62,16 @@ ask_install() ->
 
 %%% Startup Functions
 
-start_link(BuildMeta) ->
-    wx_object:start_link({local, ?MODULE}, ?MODULE, BuildMeta, []).
+-spec start_link(BuildMeta, Platform) -> Result
+    when BuildMeta :: ael:build_meta(),
+         Platform  :: ael:platform(),
+         Result    :: wx:wx_object() | {error, Reason :: term()}.
+
+start_link(BuildMeta, Platform) ->
+    wx_object:start_link({local, ?MODULE}, ?MODULE, {BuildMeta, Platform}, []).
 
 
-init(BuildMeta) ->
+init({BuildMeta, Platform}) ->
     ok = log(info, "GUI starting..."),
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, "ÆL"),
@@ -79,16 +84,24 @@ init(BuildMeta) ->
          {"Chain Explorer",   ael_v_chain},
          {"Network Explorer", ael_v_network},
          {"Mempool Explorer", ael_v_mempool}],
+    Disable = [ael_v_dev, ael_v_chain, ael_v_network, ael_v_mempool],
 
     MakeButton =
         fun({Label, Mod}) ->
             Button = wxButton:new(Frame, ?wxID_ANY, [{label, Label}]),
             ID = wxButton:getId(Button),
             _ = wxSizer:add(MainSz, Button, zxw:flags(base)),
+            ok =
+                case lists:member(Mod, Disable) of
+                    true ->
+                        _ = wxButton:disable(Button),
+                        ok;
+                    false ->
+                        ok
+                end,
             #button{name = Mod, id = ID, wx = Button}
         end,
     Buttons = lists:map(MakeButton, ButtonConf),
-%   _ = wxButton:disable(ConfBn),
 
     TextStyle = [{style, ?wxTE_MULTILINE}],
     Console = wxTextCtrl:new(Frame, ?wxID_ANY, TextStyle),
@@ -106,12 +119,18 @@ init(BuildMeta) ->
     BuildString =
         case BuildMeta of
             {AEVer, ERTSVer} ->
-                Format = "Current build: AE ~s built with ERTS ~s.~n",
-                io_lib:format(Format, [AEVer, ERTSVer]);
+                F = "Current build: AE ~s built with ERTS ~s.~n",
+                io_lib:format(F, [AEVer, ERTSVer]);
             none ->
                 "No AE node is currently built.\n"
         end,
+    {{OS, Version}, OTP, ERTS} = Platform,
+    Format =
+        "OS: ~p-~s~n"
+        "OTP R~s (v~s)~n",
+    PlatformString = io_lib:format(Format, [OS, Version, OTP, ERTS]),
     ok = wxTextCtrl:appendText(Console, BuildString),
+    ok = wxTextCtrl:appendText(Console, PlatformString),
 
     State = #s{frame = Frame, buttons = Buttons, console = Console},
     {Frame, State}.

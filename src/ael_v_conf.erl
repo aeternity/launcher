@@ -1,8 +1,13 @@
 %%% @doc
-%%% ÆL Conf Editor
+%%% ÆL Conf
 %%%
-%%% The configuration window itself.
-%%% Each window represents a single configuration file.
+%%% This process is responsible for creating the conf GUI frame which should show the
+%%% user the configs known to the system, their names, and any comments for each.
+%%% A user should be able to create, edit and delete config files as well as export
+%%% them (actually just a copy operation) to an arbitrary location as a .json file.
+%%%
+%%% Config files have metadata that includes the name of the config, its path, and
+%%% comments.
 %%%
 %%% Reference: http://erlang.org/doc/man/wx_object.html
 %%% @end
@@ -13,122 +18,94 @@
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
 
--behavior(ael_view).
 -behavior(wx_object).
 -include_lib("wx/include/wx.hrl").
--export([start_link/1, to_front/1]).
+-export([to_front/1, set_manifest/1]).
+-export([start_link/1]).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2, handle_event/2]).
-
--export_type([meta/0]).
-
 -include("$zx_include/zx_logger.hrl").
 -include("ael_conf.hrl").
 
+-record(editor,
+        {name = ""   :: string(),
+         win  = none :: wx:wx_object(),
+         pid  = none :: none | pid(),
+         mon  = none :: none | reference()}).
 
 -record(s,
-        {frame          = none          :: none | wx:wx_object(),
-         conf           = defaults()    :: map(),
-         meta           = #conf_meta{}  :: meta(),
-         % sync
-         upnp_enabled   = none          :: wx:wx_object(),
-         listen_address = none          :: {Addr1 :: wx:wx_object(),
-                                            Addr2 :: wx:wx_object(), 
-                                            Addr3 :: wx:wx_object(),
-                                            Addr4 :: wx:wx_object()},
-         port           = none          :: wx:wx_object(),
-         external_port  = none          :: wx:wx_object(),
-         % mining
-         autostart      = none          :: wx:wx_object(),
-         beneficiary    = none          :: wx:wx_object(),
-         cuckoo         = []            :: [{Executable :: string(), Cores :: integer()}],
-         % fork_management
-         network_id     = none          :: wx:wx_object(),
-         % system
-         cores          = core_count()  :: pos_integer()}).
+        {frame    = none :: none | wx:wx_object(),
+         selector = none :: none | wx:wx_object(),
+         selected = none :: none | non_neg_integer(),
+         manifest = []   :: [meta()],
+         editors  = []   :: [editor()]}).
 
 
--type state() :: term().
-% FIXME:
-%   This should probably just be in ael.erl as ael:conf_meta() since ael_conf.erl
-%   will soon be removed.
--type meta()  :: #conf_meta{}.
+-type state()  :: term().
+-type editor() :: #editor{}.
+-type meta()   :: #conf_meta{}.
 
--define(saveCONF,   11).
+-define(newCONF,    11).
+-define(editCONF,   12).
+-define(dropCONF,   13).
+-define(exportCONF, 14).
 
 
-%%% Interface
+%%% Interface functions
+
+-spec to_front(Win) -> ok
+    when Win :: module() | pid() | wx:wx_object().
 
 to_front(Win) ->
     wx_object:cast(Win, to_front).
 
 
+-spec set_manifest(Entries) -> ok
+    when Entries :: [ael:conf_meta()].
+
+set_manifest(Entries) ->
+    case is_pid(whereis(?MODULE)) of
+        true  -> wx_object:cast(?MODULE, {set_manifest, Entries});
+        false -> ok
+    end.
+
+
 %%% Startup Functions
 
-start_link(ConfMeta) ->
-    wx_object:start_link(?MODULE, ConfMeta, []).
+start_link(Args) ->
+    wx_object:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
 
-init(Meta) ->
+init({Manifest, Cores}) ->
     Wx = wx:new(),
-    Frame = wxFrame:new(Wx, ?wxID_ANY, "Edit Aeternity Node Configuration"),
+    Frame = wxFrame:new(Wx, ?wxID_ANY, "Aeternity Configuration"),
 
     MainSz = wxBoxSizer:new(?wxVERTICAL),
     ButtSz = wxBoxSizer:new(?wxHORIZONTAL),
-    SaveBn = wxButton:new(Frame, ?saveCONF,   [{label, "Save"}]),
-    UPnPTx = wxStaticText:new(Frame, ?wxID_ANY, "UPnP", []),
-    UPnPCk = wxCheckBox:new(Frame, ?wxID_ANY, "Enabled"),
-    AddrTx = wxStaticText:new(Frame, ?wxID_ANY, "Listen Address", []),
-    Addr1T = wxTextCtrl:new(Frame, ?wxID_ANY),
-    Addr2T = wxTextCtrl:new(Frame, ?wxID_ANY),
-    Addr3T = wxTextCtrl:new(Frame, ?wxID_ANY),
-    Addr4T = wxTextCtrl:new(Frame, ?wxID_ANY),
-    PortCt = wxTextCtrl:new(Frame, ?wxID_ANY, [{value, "3015"}]),
-    ExtPortTx = wxStaticText:new(Frame, ?wxID_ANY, "External Port", []),
-    ExtPortCt = wxTextCtrl:new(Frame, ?wxID_ANY, [{value, "3015"}]),
-%   MiningLabel = wxStaticText:new(Frame, ?wxID_ANY, "Mining", []),
-%   AutoStartCk = wxCheckBox:new(Frame, ?wxID_ANY, "Autostart"),
-%   BeneficiaryTx = wxStaticText:new(Frame, ?wxID_ANY, "Beneficiary", []),
-%   BeneficiaryCt = wxTextCtrl:new(Frame, ?wxID_ANY),
-%   NetworkLabel = wxStaticText:new(Frame, ?wxID_ANY, "Network", []),
-%   NetworkID = wxTextCtrl:new(Frame, ?wxID_ANY),
-%   Cores = core_count() - 1,
-%   CoreCt = wxTextCtrl:new(Frame, ?wxID_ANY, [{value, integer_to_list(Cores)}]),
+    NewBn    = wxButton:new(Frame, ?newCONF, [{label, "New"}]),
+    EditBn   = wxButton:new(Frame, ?editCONF,   [{label, "Edit"}]),
+    DropBn   = wxButton:new(Frame, ?dropCONF,   [{label, "Delete"}]),
+    ExportBn = wxButton:new(Frame, ?exportCONF, [{label, "Export"}]),
+    Headers = [{"Name", 200}, {"Memo", 400}],
+    Items = [{Name, Memo} || #conf_meta{name = Name, memo = Memo} <- Manifest],
+    Selector = zxw:list_control(Frame, ?wxID_ANY, Headers, Items),
+    _ = wxSizer:add(ButtSz, NewBn,    zxw:flags(wide)),
+    _ = wxSizer:add(ButtSz, EditBn,   zxw:flags(wide)),
+    _ = wxSizer:add(ButtSz, DropBn,   zxw:flags(wide)),
+    _ = wxSizer:add(ButtSz, ExportBn, zxw:flags(wide)),
+    _ = wxSizer:add(MainSz, ButtSz,   zxw:flags(base)),
+    _ = wxSizer:add(MainSz, Selector, zxw:flags(wide)),
+    _ = wxFrame:setSizer(Frame, MainSz),
+    _ = wxSizer:layout(MainSz),
 
-    _ = wxSizer:add(ButtSz, SaveBn, zxw:flags(wide)),
-    _ = wxSizer:add(MainSz, ButtSz, zxw:flags(wide)),
-    InputSz = wxFlexGridSizer:new(3, 2, 4, 4),
-    ok = wxFlexGridSizer:setFlexibleDirection(InputSz, ?wxHORIZONTAL),
-    ok = wxFlexGridSizer:addGrowableCol(InputSz, 1),
-    _ = wxSizer:add(InputSz, UPnPTx, [{flag, ?wxCENTER}]),
-    _ = wxSizer:add(InputSz, UPnPCk, zxw:flags(wide)),
-    AddrSz = wxBoxSizer:new(?wxHORIZONTAL),
-    _ = wxSizer:add(InputSz, AddrTx, [{flag, ?wxCENTER}]),
-    _ = wxSizer:add(AddrSz, Addr1T, zxw:flags(base)),
-    _ = wxSizer:add(AddrSz, Addr2T, zxw:flags(base)),
-    _ = wxSizer:add(AddrSz, Addr3T, zxw:flags(base)),
-    _ = wxSizer:add(AddrSz, Addr4T, zxw:flags(base)),
-    Colon = wxStaticText:new(Frame, ?wxID_ANY, ":", []),
-    _ = wxSizer:add(AddrSz, Colon, zxw:flags(base)),
-    _ = wxSizer:add(AddrSz, PortCt, zxw:flags(base)),
-    _ = wxSizer:add(InputSz, AddrSz, zxw:flags(wide)),
-    _ = wxSizer:add(InputSz, ExtPortTx, [{flag, ?wxCENTER}]),
-    _ = wxSizer:add(InputSz, ExtPortCt),
-    _ = wxSizer:add(MainSz, InputSz, zxw:flags(base)),
-    
-    wxFrame:setSizer(Frame, MainSz),
-    wxSizer:layout(MainSz),
-
-    ok = wxFrame:fit(Frame),
+    ok = wxFrame:setSize(Frame, {600, 200}),
+    ok = wxFrame:center(Frame),
     ok = wxFrame:connect(Frame, close_window),
-    ok = wxFrame:connect(Frame, command_menu_selected),
+    ok = wxFrame:connect(Frame, command_button_clicked),
+    ok = wxFrame:connect(Selector, command_list_item_selected),
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
-    State = #s{frame = Frame, meta = Meta,
-               upnp_enabled   = UPnPCk,
-               listen_address = {Addr1T, Addr2T, Addr3T, Addr4T},
-               port           = PortCt,
-               external_port  = ExtPortCt},
+    State = #s{frame = Frame, selector = Selector, manifest = Manifest},
     {Frame, State}.
 
 
@@ -156,8 +133,11 @@ handle_call(Unexpected, From, State) ->
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_cast-2
 
 handle_cast(to_front, State = #s{frame = Frame}) ->
-    ok = wxWindow:raise(Frame),
+    ok = wxFrame:raise(Frame),
     {noreply, State};
+handle_cast({set_manifest, Entries}, State) ->
+    NewState = do_set_manifest(Entries, State),
+    {noreply, NewState};
 handle_cast(Unexpected, State) ->
     ok = tell(warning, "Unexpected cast: ~tp~n", [Unexpected]),
     {noreply, State}.
@@ -171,6 +151,9 @@ handle_cast(Unexpected, State) ->
 %% The gen_server:handle_info/2 callback.
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
 
+handle_info({'DOWN', Mon, process, PID, Info}, State) ->
+    NewState = handle_down(Mon, PID, Info, State),
+    {noreply, NewState};
 handle_info(Unexpected, State) ->
     ok = tell(warning, "Unexpected info: ~tp~n", [Unexpected]),
     {noreply, State}.
@@ -184,12 +167,41 @@ handle_info(Unexpected, State) ->
 %% The wx_object:handle_event/2 callback.
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
 
+handle_event(#wx{event = #wxList{type = command_list_item_selected,
+                                 itemIndex = Index}},
+             State) ->
+    {noreply, State#s{selected = Index}};
+handle_event(#wx{event = #wxCommand{type = command_button_clicked}, id = ID}, State) ->
+    NewState =
+        case ID of
+            ?newCONF    -> new(State);
+            ?editCONF   -> edit(State);
+            ?dropCONF   -> drop(State);
+            ?exportCONF -> export(State)
+        end,
+    {noreply, NewState};
+handle_event(#wx{event = #wxList{type = command_list_item_activated,
+                                 itemIndex = Index}},
+             State) ->
+    NewState = edit(State = #s{selected = Index}),
+    {noreply, NewState};
 handle_event(#wx{event = #wxClose{}}, State) ->
     NewState = close(State),
     {noreply, NewState};
 handle_event(Event, State) ->
     ok = tell(info, "Unexpected event ~tp State: ~tp~n", [Event, State]),
     {noreply, State}.
+
+
+handle_down(Mon, PID, Info, State = #s{editors = Editors}) ->
+    case lists:keytake(Mon, #editor.mon, Editors) of
+        {value, _, NewEditors} ->
+            State#s{editors = NewEditors};
+        false ->
+            Unexpected = {'DOWN', Mon, process, PID, Info},
+            ok = log(warning, "Unexpected info: ~tp~n", [Unexpected]),
+            State
+    end.
 
 
 code_change(_, State, _) ->
@@ -203,67 +215,74 @@ terminate(Reason, State) ->
 
 %%% Doers
 
-%configure(Conf, State) ->
-%    Defaults = defaults(),
-%    Defaulty =
-%        fun(Section) ->
-%            Default = maps:get(Section, Defaults),
-%            maps:merge(Default, maps:get(Section, Conf, Default))
-%        end,
-%    #{"upnp_enabled"   := UPNP,
-%      "listen_address" := ListenAddress,
-%      "port"           := LocalPort,
-%      "external_port"  := ExternalPort}             = Defaulty("sync"),
-%    #{"autostart"      := AutoStart,
-%      "beneficiary"    := BeneficiaryM,
-%      "cuckoo"         := #{"miners" := Miners}}    = Defaulty("mining"),
-%    #{"network_id"     := NetworkID}                = Defaulty("fork_management"),
-%    [#{"executable" := "mean29-generic",
-%       "extra_args" := "-t " ++ CoresS}] = Miners,
-%    Beneficiary =
-%        case BeneficiaryM =:= unknown of
-%            false -> BeneficiaryM;
-%            true  -> ""
-%        end,
-%    Cores = list_to_integer(CoresS),
-%    MinerTypes =
-%        ["mean29-generic",
-%         "mean29-avx2",
-%         "lean29-generic",
-%         "lean29-avx2"],
-%    ok.
+% FIXME: Remove editors, cores, etc.
+% Should I generate a fake name for new files? Could be funny... hm...
+new(State = #s{editors = Editors}) ->
+    Editor = open_editor(#conf_meta{}, Cores),
+    State#s{editors = [Editor | Editors]}.
 
-defaults() ->
-    Cores = integer_to_list(core_count() - 1),
-    #{"sync" =>
-        #{"upnp_enabled"   => false,
-          "listen_address" => "0.0.0.0",
-          "port"           => 3015,
-          "external_port"  => 3015},
-      "mining" =>
-        #{"autostart"   => false,
-          "beneficiary" => undefined,
-          "cuckoo"      =>
-            #{"miners" => [#{"executable" => "mean29-generic",
-                             "extra_args" => "-t " ++ Cores}]}},
-      "fork_management" =>
-        #{"network_id" => "ae_mainnet"}}.
 
-core_count() ->
-    Count = core_count(erlang:system_info(cpu_topology), 0),
-    ok = tell("Core count: ~w", [Count]),
-    Count.
+edit(State = #s{manifest = Manifest, editors  = Editors,
+                selector = Selector, selected = Selected,
+                cores    = Cores}) ->
+    Name = wxListCtrl:getItemText(Selector, Selected, [{col, 0}]),
+    case lists:keyfind(Name, #editor.name, Editors) of
+        false ->
+            tell(info, "Selected: ~p", [Selected]),
+            tell(info, "Name: ~p", [Name]),
+            tell(info, "Manifest: ~p", [Manifest]),
+            ConfMeta = lists:keyfind(Name, #conf_meta.name, Manifest),
+            NewEditor = open_editor(ConfMeta, Cores),
+            NewEditors = [NewEditor | Editors],
+            State#s{editors = NewEditors};
+        #editor{pid = PID} ->
+            ok = ael_v_conf:to_front(PID),
+            State
+    end.
 
-core_count([], C) ->
-    C;
-core_count([{_, {logical, N}} | T], C) when is_integer(N) ->
-    core_count(T, C + 1);
-core_count([{_, Sub} | T], C) when is_list(Sub) ->
-    core_count(T, core_count(Sub, C));
-core_count([{_, _, {logical, N}} | T], C) when is_integer(N) ->
-    core_count(T, C + 1);
-core_count([{_, _, Sub} | T], C) when is_list(Sub) ->
-    core_count(T, core_count(Sub, C)).
+
+open_editor(Meta = #conf_meta{name = Name}, Cores) ->
+    {ok, Conf} = ael_con:read_conf(Name),
+    Win = ael_v_conf_editor:start_link({Meta, Conf, Cores}),
+    PID = wx_object:get_pid(Win),
+    Mon = monitor(process, PID),
+    #editor{name = Name, win = Win, pid = PID, mon = Mon}.
+
+
+drop(State = #s{selected = none}) ->
+    State;
+drop(State = #s{selector = Selector, selected = Selected, manifest = Manifest}) ->
+    Name = wxListCtrl:getItemText(Selector, Selected, [{col, 1}]),
+    ok = wxListCtrl:deleteItem(Selector, Selected),
+    case lists:keytake(Name, #conf_meta.name, Manifest) of
+        {value, #conf_meta{path = Path}, NewManifest} ->
+            ok = case file:delete(Path) of ok -> ok; {error, enoent} -> ok end,
+            State#s{manifest = NewManifest};
+        false ->
+            State
+    end.
+
+
+export(State = #s{selected = none}) ->
+    State;
+export(State = #s{selector = Selector, selected = Index}) ->
+    ID = list_to_integer(wxListCtrl:getItemText(Selector, Index)),
+    tell(info, "Would be exporting ~p", [ID]),
+    State.
+
+
+do_set_manifest(Entries, State = #s{selector = Selector}) ->
+    Items = [{Name, Memo} || #conf_meta{name = Name, memo = Memo} <- Entries],
+    true = wxListCtrl:deleteAllItems(Selector),
+    ColNums = [0, 1],
+    AddRow =
+        fun({Row, Atts}) ->
+            _ = wxListCtrl:insertItem(Selector, Row, ""),
+            Set = fun({Col, Data}) -> wxListCtrl:setItem(Selector, Row, Col, Data) end,
+            ok = lists:foreach(Set, lists:zip(ColNums, tuple_to_list(Atts)))
+        end,
+    ok = lists:foreach(AddRow, lists:zip(lists:seq(0, length(Items) -1), Items)),
+    State#s{manifest = Entries}.
 
 
 close(State = #s{frame = Frame}) ->
