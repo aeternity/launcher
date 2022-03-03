@@ -27,6 +27,8 @@
         {frame          = none         :: none | wx:wx_object(),
          conf           = #{}          :: map(),
          meta           = #conf_meta{} :: ael:conf_meta(),
+         name           = none         :: none | wx:object(),
+         memo           = none         :: none | wx:object(),
          controls       = #{}          :: map(),
          cores          = 2            :: pos_integer()}).
 
@@ -60,11 +62,24 @@ init({Meta, Conf, Cores}) ->
     ButtSz = wxBoxSizer:new(?wxHORIZONTAL),
     SaveBn = wxButton:new(Frame, ?saveCONF,   [{label, "Save"}]),
 
+    MetaSz = wxFlexGridSizer:new(2),
+    ok = wxFlexGridSizer:setFlexibleDirection(MetaSz, ?wxHORIZONTAL),
+    ok = wxFlexGridSizer:addGrowableCol(MetaSz, 1),
+    #conf_meta{name = Name, memo = Memo} = Meta,
+    NameLabel = wxStaticText:new(Frame, ?wxID_ANY, "Name"),
+    _ = wxSizer:add(MetaSz, NameLabel, zxw:flags(base)),
+    NameTx = wxTextCtrl:new(Frame, ?wxID_ANY, [{value, Name}]),
+    _ = wxSizer:add(MetaSz, NameTx, zxw:flags(wide)),
+    MemoLabel = wxStaticText:new(Frame, ?wxID_ANY, "Memo"),
+    _ = wxSizer:add(MetaSz, MemoLabel, zxw:flags(base)),
+    MemoTx = wxTextCtrl:new(Frame, ?wxID_ANY, [{value, Memo}]),
+    _ = wxSizer:add(MetaSz, MemoTx, zxw:flags(wide)),
+    _ = wxSizer:add(MainSz, MetaSz, zxw:flags(wide)),
+
     SchemaPath = filename:join(zx:get_home(), "priv/aeternity_config_schema.json"),
     {ok, Bin} = file:read_file(SchemaPath),
     {ok, GarbageJoggerScriptFormat} = zj:decode(Bin),
     Schema = maps:get("properties", GarbageJoggerScriptFormat),
-    ok = ael_gui:show(io_lib:format("~tp~n", [Schema])),
 
     _ = wxSizer:add(ButtSz, SaveBn, zxw:flags(wide)),
     _ = wxSizer:add(MainSz, ButtSz, zxw:flags(wide)),
@@ -81,7 +96,9 @@ init({Meta, Conf, Cores}) ->
     ok = wxFrame:connect(Frame, command_menu_selected),
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
-    State = #s{frame = Frame, meta = Meta, controls = Controls, cores = Cores},
+    State = #s{frame = Frame, meta = Meta,
+               name = NameTx, memo = MemoTx,
+               controls = Controls, cores = Cores},
     {Frame, State}.
 
 %% NOTE: Because platform and node configuration are conflated in the JSON schema and
@@ -90,8 +107,8 @@ init({Meta, Conf, Cores}) ->
 %%       work put into it.
 build_schema(Schema, Conf, Parent, Sizer) ->
     EditableSections =
-        ["chain",
-         "fork_management",
+        ["fork_management",
+%        "chain",
          "http",
          "logging",
          "peers",
@@ -108,20 +125,20 @@ build_schema(Schema, Conf, Parent, Sizer) ->
                 TrimmedHTTP = maps:put("properties", SubSections, HTTP),
                 Configured = maps:get("http", Conf, none),
                 {"http", TrimmedHTTP, Configured};
-            ("chain") ->
-                Chain = maps:get("chain", Schema),
-                Properties = maps:get("properties", Chain),
-                SubSections = maps:with(["persist", "db_path"], Properties),
-                TrimmedChain = maps:put("properties", SubSections, Chain),
-                Configured = maps:get("chain", Conf, none),
-                {"chain", TrimmedChain, Configured};
+%           ("chain") ->
+%               Chain = maps:get("chain", Schema),
+%               Properties = maps:get("properties", Chain),
+%               SubSections = maps:with(["persist", "db_path"], Properties),
+%               TrimmedChain = maps:put("properties", SubSections, Chain),
+%               Configured = maps:get("chain", Conf, none),
+%               {"chain", TrimmedChain, Configured};
             ("fork_management") ->
                 FM = maps:get("fork_management", Schema),
                 Properties = maps:get("properties", FM),
                 SubSections = maps:with(["network_id"], Properties),
                 TrimmedFM = maps:put("properties", SubSections, FM),
                 Configured = maps:get("fork_management", Conf, none),
-                {"chain", TrimmedFM, Configured};
+                {"fork_management", TrimmedFM, Configured};
             (Key) ->
                 {Key, maps:get(Key, Schema), maps:get(Key, Conf, none)}
         end,
@@ -193,7 +210,7 @@ text_checker(Pattern) ->
 int_checker(Scheme) ->
     case {maps:get("minimum", Scheme, none), maps:get("maximum", Scheme, none)} of
         {none, none} -> none;
-        {none, Max}  -> fun(N) -> N =< Max end;
+        {none, Max}  -> fun(N) -> N   =< Max end;
         {Min,  none} -> fun(N) -> Min =< N end;
         {Min,  Max}  -> fun(N) -> Min =< N andalso N =< Max end
     end.
@@ -278,8 +295,11 @@ handle_info(Unexpected, State) ->
 %% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
 
 handle_event(#wx{event = #wxCommand{type = command_button_clicked}}, State) ->
-    ok = do_save(State),
-    NewState = close(State),
+    NewState =
+        case do_save(State) of
+            ok    -> close(State);
+            error -> State
+        end,
     {noreply, NewState};
 handle_event(#wx{event = #wxClose{}}, State) ->
     NewState = close(State),
@@ -300,11 +320,31 @@ terminate(Reason, State) ->
 
 %%% Doers
 
-do_save(#s{controls = Controls}) ->
-    tell(info, "Controls: ~p", [Controls]),
-    Conf = maps:map(fun extract/2, Controls),
-    tell(info, "Conf: ~p", [Conf]).
+do_save(#s{meta = OldMeta, name = NameTx, memo = MemoTx, controls = Controls}) ->
+    case wxTextCtrl:getValue(NameTx) of
+        "" ->
+            error;
+        Name ->
+            Memo = wxTextCtrl:getValue(MemoTx),
+            PartialConf = maps:map(fun extract/2, Controls),
+            #{"fork_management" := #{"network_id" := NetID}} = PartialConf,
+            File = string:join(string:lexemes(Name, " \　"), "_") ++ ".json",
+            Path = filename:join(ael_con:conf_dir_path(), File),
+            Data = filename:join(ael_con:data_root(), NetID),
+            Conf = maps:put("chain", #{"db_path" => Data}, PartialConf),
+            NewMeta = OldMeta#conf_meta{name = Name,
+                                        memo = Memo,
+                                        path = Path,
+                                        data = Data},
+            ok = ael_con:save_conf(OldMeta, NewMeta, Conf)
+    end.
 
+
+% TODO: This procedure needs to be changed for explicit recursion so it can set
+%       a final `ok | error` return while also highlighting (and maybe assembling
+%       an explanation about) the failed parts of the configuration input if a
+%       check actually fails instead of silently accepting the bad input and nixing
+%       it!
 extract(Key, {string, Control, none}) ->
     log(info, "Key: ~p, Control: ~p", [Key, Control]),
     wxTextCtrl:getValue(Control);

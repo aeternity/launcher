@@ -88,6 +88,8 @@ init(Manifest) ->
     _ = wxFrame:setSizer(Frame, MainSz),
     _ = wxSizer:layout(MainSz),
 
+    _ = wxButton:disable(ExportBn),
+
     ok = wxFrame:setSize(Frame, {600, 200}),
     ok = wxFrame:center(Frame),
     ok = wxFrame:connect(Frame, close_window),

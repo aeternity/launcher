@@ -19,9 +19,9 @@
 % Node GUI interface
 -export([run_node/1, stop_ae/0, build_complete/4]).
 % Config Interface
--export([save_conf/2, read_conf/1, drop_conf/1]).
+-export([save_conf/3, read_conf/1, drop_conf/1]).
 % Utility functions
--export([var/0]).
+-export([var/0, conf_dir_path/0, data_root/0]).
 % gen_server
 -export([start_link/0, stop/0]).
 -export([init/1, terminate/2, code_change/3,
@@ -94,12 +94,13 @@ show_ui(Name) ->
     gen_server:cast(?MODULE, {show_ui, Name}).
 
 
--spec save_conf(Meta, Conf) -> ok
-    when Meta :: ael:conf_meta(),
-         Conf :: map().
+-spec save_conf(OldMeta, NewMeta, Conf) -> ok
+    when OldMeta :: ael:conf_meta(),
+         NewMeta :: ael:conf_meta(),
+         Conf    :: map().
 
-save_conf(Meta, Conf) ->
-    gen_server:cast(?MODULE, {save_conf, Meta, Conf}).
+save_conf(OldMeta, NewMeta, Conf) ->
+    gen_server:cast(?MODULE, {save_conf, OldMeta, NewMeta, Conf}).
 
 
 -spec read_conf(Name) -> {ok, map()} | error
@@ -176,11 +177,10 @@ check_conf_manifest() ->
 
 generate_manifest(ManifestPath) ->
     ConfRoot = filename:dirname(ManifestPath),
-    DataRoot = filename:join(var(), "data"),
     Mainnet = "ae_mainnet",
     Testnet = "ae_uat",
-    MainnetData = filename:join(DataRoot, Mainnet),
-    TestnetData = filename:join(DataRoot, Testnet),
+    MainnetData = filename:join(data_root(), Mainnet),
+    TestnetData = filename:join(data_root(), Testnet),
     Confs =
         [{#conf_meta{name = "Mainnet Node",
                      path = filename:join(ConfRoot, "mainnet_node.json"),
@@ -219,8 +219,8 @@ handle_cast({show_ui, Name}, State) ->
 handle_cast({save_manifest, Entries}, State) ->
     ok = do_save_manifest(Entries),
     {noreply, State};
-handle_cast({save_conf, Meta, Conf}, State) ->
-    NewState = do_save_conf(Meta, Conf, State),
+handle_cast({save_conf, OldMeta, NewMeta, Conf}, State) ->
+    NewState = do_save_conf(OldMeta, NewMeta, Conf, State),
     {noreply, NewState};
 handle_cast({drop_conf, Name}, State) ->
     NewState = do_drop_conf(Name, State),
@@ -317,12 +317,24 @@ do_save_manifest(Entries) ->
     zx_lib:write_terms(ManifestPath, Entries).
 
 
-do_save_conf(Meta = #conf_meta{name = Name}, Conf, State = #s{manifest = Manifest}) ->
+
+do_save_conf(Meta,
+             Meta = #conf_meta{name = Name},
+             Conf,
+             State = #s{manifest = Manifest}) ->
+    ok = log(info, "Saving conf"),
     NewManifest = lists:keystore(Name, #conf_meta.name, Manifest, Meta),
     ok = write_conf({Meta, Conf}),
     ok = do_save_manifest(NewManifest),
     ok = notify_manifest_update(NewManifest),
-    State#s{manifest = NewManifest}.
+    State#s{manifest = NewManifest};
+do_save_conf(#conf_meta{name = OldName},
+             NewMeta,
+             Conf,
+             State) ->
+    ok = log(info, "Saving with new conf meta"),
+    NewState = do_drop_conf(OldName, State),
+    do_save_conf(NewMeta, NewMeta, Conf, NewState).
 
 
 do_read_conf(Name, #s{manifest = Manifest}) ->
@@ -341,6 +353,7 @@ do_drop_conf(Name, State = #s{manifest = Manifest}) ->
                 ResetManifest;
             {value, #conf_meta{path = Path}, NextManifest} ->
                 ok = file:delete(Path),
+                ok = do_save_manifest(NextManifest),
                 ok = notify_manifest_update(NextManifest),
                 NextManifest;
             false ->
@@ -356,7 +369,7 @@ notify_manifest_update(NewManifest) ->
 
 write_conf({#conf_meta{path = Path}, Conf}) ->
     JSON = zj:encode(Conf),
-    ok = file:write_file(Path, JSON).
+    ok = file:write_file(Path, [JSON, "\n"]).
 
 
 do_run_node(State = #s{node = none, build = BuildMeta}, ConfName) ->
@@ -533,6 +546,9 @@ conf_manifest_path() ->
 
 conf_dir_path() ->
     filename:join(var(), "conf").
+
+data_root() ->
+    filename:join(var(), "data").
 
 
 

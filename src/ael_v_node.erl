@@ -405,13 +405,18 @@ update_graph(Name, G = {GraphIDs, Graphs}, Diff) ->
 
 
 do_set_manifest(Names, #s{conf_pk = ConfPk}) ->
+    tell(info, "ConfPk: ~p", [ConfPk]),
     Selected = wxChoice:getStringSelection(ConfPk),
+    tell(info, "Selected: ~p", [Selected]),
     LastIndex = length(Names) - 1,
-    ok = wxControl:clear(ConfPk),
+    ok = wxChoice:clear(ConfPk),
     LastIndex = wxChoice:insertStrings(ConfPk, Names, 0),
     case wxChoice:setStringSelection(ConfPk, Selected) of
-        true  -> ok;
-        false -> log(info, "Config update removed selected item ~ts", [Selected])
+        true ->
+            ok;
+        false ->
+            ok = wxChoice:setSelection(ConfPk, 0),
+            log(info, "Config update removed selected item ~ts", [Selected])
     end.
 
 
