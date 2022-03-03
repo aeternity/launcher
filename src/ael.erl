@@ -10,7 +10,21 @@
 -license("ISC").
 
 -export([start/2, stop/1]).
+-include("ael_conf.hrl").
 
+
+%%% Type and Record Definitions
+
+-export_type([conf_meta/0, platform/0, build_meta/0]).
+
+-type conf_meta()  :: #conf_meta{}.
+-type platform()   :: {System :: {OS :: atom(), Version :: string() | unknown},
+                       OTP    :: string(),
+                       ERTS   :: string()}.
+-type build_meta() :: {AE_Version :: string(), ERTS_Version :: string()}.
+
+
+%%% Interface
 
 -spec start(normal, Args :: term()) -> {ok, pid()}.
 %% @private

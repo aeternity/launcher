@@ -1,7 +1,7 @@
 %%% Conf meta record type.
 
 -record(conf_meta,
-        {id   = 0  :: integer(),
-         name = "" :: string(),
+        {name = "" :: string(),
          path = "" :: string(),
-         memo = "" :: string()}).
+         memo = "" :: string(),
+         data = "" :: string()}).

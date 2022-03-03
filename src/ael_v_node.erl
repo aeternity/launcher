@@ -18,12 +18,13 @@
 -behavior(ael_view).
 -behavior(wx_object).
 -include_lib("wx/include/wx.hrl").
--export([stat/1, ask_install/0]).
+-export([set_manifest/1, stat/1, ask_install/0]).
 -export([start_link/1, to_front/1]).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2,
          handle_event/2, handle_sync_event/3]).
 -include("$zx_include/zx_logger.hrl").
+-include("ael_conf.hrl").
 
 
 -record(s,
@@ -47,9 +48,24 @@
 
 %%% Interface functions
 
+-spec to_front(Win) -> ok
+    when Win :: module() | pid() | wx:wx_object().
 
 to_front(Win) ->
     wx_object:cast(Win, to_front).
+
+
+-spec set_manifest(Entries) -> ok
+    when Entries :: [ael:conf_meta()].
+
+set_manifest(Entries) ->
+    case is_pid(whereis(?MODULE)) of
+        true ->
+            Names = [Name || #conf_meta{name = Name} <- Entries],
+            wx_object:cast(?MODULE, {set_manifest, Names});
+        false ->
+            ok
+    end.
 
 
 -spec stat([Element]) -> ok
@@ -72,11 +88,11 @@ ask_install() ->
 
 %%% Startup Functions
 
-start_link(none) ->
-    wx_object:start_link({local, ?MODULE}, ?MODULE, none, []).
+start_link(ConfNames) ->
+    wx_object:start_link({local, ?MODULE}, ?MODULE, ConfNames, []).
 
 
-init(none) ->
+init(ConfNames) ->
     ok = log(info, "GUI starting..."),
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, "Local ÆL Node"),
@@ -89,12 +105,6 @@ init(none) ->
     StatSz = wxBoxSizer:new(?wxVERTICAL),
 
     NodeBn = wxButton:new(Window, ?NODE, [{label, "Run Node"}]),
-    ConfNames =
-        ["Mainnet Node",
-         "Testnet Node",
-         "Developer Mode",
-         "Mainnet CPU Miner",
-         "Testnet CPU Miner"],
     ConfPk = wxChoice:new(Window, ?wxID_ANY, [{choices, ConfNames}]),
     ok = wxChoice:setSelection(ConfPk, 0),
     _ = wxSizer:add(ButtSz, NodeBn, zxw:flags(base)),
@@ -200,6 +210,9 @@ handle_call(Unexpected, From, State) ->
 handle_cast({stat, Elements}, State) ->
     NewState = lists:foldl(fun do_stat/2, State, Elements),
     {noreply, NewState};
+handle_cast({set_manifest, Names}, State) ->
+    ok = do_set_manifest(Names, State),
+    {noreply, State};
 handle_cast(to_front, State = #s{frame = Frame}) ->
     ok = wxWindow:raise(Frame),
     {noreply, State};
@@ -391,8 +404,25 @@ update_graph(Name, G = {GraphIDs, Graphs}, Diff) ->
     end.
 
 
-run_node(State) ->
-    case ael_con:run_node() of
+do_set_manifest(Names, #s{conf_pk = ConfPk}) ->
+    tell(info, "ConfPk: ~p", [ConfPk]),
+    Selected = wxChoice:getStringSelection(ConfPk),
+    tell(info, "Selected: ~p", [Selected]),
+    LastIndex = length(Names) - 1,
+    ok = wxChoice:clear(ConfPk),
+    LastIndex = wxChoice:insertStrings(ConfPk, Names, 0),
+    case wxChoice:setStringSelection(ConfPk, Selected) of
+        true ->
+            ok;
+        false ->
+            ok = wxChoice:setSelection(ConfPk, 0),
+            log(info, "Config update removed selected item ~ts", [Selected])
+    end.
+
+
+run_node(State = #s{conf_pk = ConfPk}) ->
+    Selected = wxChoice:getStringSelection(ConfPk),
+    case ael_con:run_node(Selected) of
         ok      -> State;
         running -> State
     end.
