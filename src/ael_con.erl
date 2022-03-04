@@ -8,7 +8,7 @@
 %%% @end
 
 -module(ael_con).
--vsn("0.1.0").
+-vsn("0.1.1").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
@@ -17,11 +17,11 @@
 % General GUI interface
 -export([show_ui/1]).
 % Node GUI interface
--export([run_node/1, stop_ae/0, build_complete/4]).
+-export([run_node/1, stop_ae/0, build_complete/4, build_cancelled/0]).
 % Config Interface
 -export([save_conf/3, read_conf/1, drop_conf/1]).
 % Utility functions
--export([var/0, conf_dir_path/0, data_root/0]).
+-export([var/0, conf_dir_path/0, data_root/0, platform/0]).
 % gen_server
 -export([start_link/0, stop/0]).
 -export([init/1, terminate/2, code_change/3,
@@ -87,6 +87,12 @@ build_complete(AEVer, ERTSVer, BaseDir, Deps) ->
     gen_server:cast(?MODULE, {build_complete, self(), {AEVer, ERTSVer, BaseDir, Deps}}).
 
 
+-spec build_cancelled() -> ok.
+
+build_cancelled() ->
+    gen_server:cast(?MODULE, build_cancelled).
+
+
 -spec show_ui(Name) -> ok
     when Name :: ui_name().
 
@@ -117,6 +123,12 @@ read_conf(Name) ->
 
 drop_conf(Name) ->
     gen_server:cast(?MODULE, {drop_conf, Name}).
+
+
+-spec platform() -> ael:platform().
+
+platform() ->
+    gen_server:call(?MODULE, platform).
 
 
 
@@ -208,6 +220,8 @@ handle_call({run_node, ConfName}, _, State) ->
 handle_call({read_conf, Name}, _, State) ->
     Response = do_read_conf(Name, State),
     {reply, Response, State};
+handle_call(platform, _, State = #s{platform = Platform}) ->
+    {reply, Platform, State};
 handle_call(Unexpected, From, State) ->
     ok = log(warning, "Unexpected call from ~tp: ~tp~n", [From, Unexpected]),
     {noreply, State}.
@@ -227,6 +241,9 @@ handle_cast({drop_conf, Name}, State) ->
     {noreply, NewState};
 handle_cast({build_complete, Builder, Meta}, State) ->
     NewState = do_build_complete(Builder, Meta, State),
+    {noreply, NewState};
+handle_cast(build_cancelled, State) ->
+    NewState = do_build_cancelled(State),
     {noreply, NewState};
 handle_cast(stop_ae, State) ->
     NewState = do_stop_ae(State),
@@ -373,6 +390,7 @@ write_conf({#conf_meta{path = Path}, Conf}) ->
 
 
 do_run_node(State = #s{node = none, build = BuildMeta}, ConfName) ->
+    ok = ael_v_node:set_button("Run Node", false),
     {ok, BPID} = ael_builder:start_link(BuildMeta),
     {ok, State#s{node = {building, BPID}, conf = ConfName}};
 do_run_node(State = #s{node = stopped}, ConfName) ->
@@ -430,8 +448,15 @@ do_build_complete(_, _, State) ->
     State.
 
 
+do_build_cancelled(State = #s{node = {building, _}}) ->
+    ok = ael_v_node:set_button("Run Node", true),
+    State#s{node = none}.
+
+
 start_node(State = #s{base_dir = BaseDir,  deps     = Deps,
                       conf     = ConfName, manifest = Manifest}) ->
+%   ok = ael_v_node:set_button("Stop Node", true),
+    ok = ael_v_node:set_button("Run Node", false),
     Selected = lists:keyfind(ConfName, #conf_meta.name, Manifest),
     #conf_meta{path = ConfPath, data = DataPath} = Selected,
     true = os:putenv("AETERNITY_CONFIG", ConfPath),

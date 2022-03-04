@@ -17,14 +17,14 @@
 %%% @end
 
 -module(ael_gui).
--vsn("0.1.0").
+-vsn("0.1.1").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
 
 -behavior(wx_object).
 -include_lib("wx/include/wx.hrl").
--export([show/1, ask_install/0]).
+-export([show/1]).
 -export([start_link/2]).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2,
@@ -53,10 +53,6 @@
 
 show(Terms) ->
     wx_object:cast(?MODULE, {show, Terms}).
-
-
-ask_install() ->
-    wx_object:call(?MODULE, ask_install, infinity).
 
 
 
@@ -146,9 +142,6 @@ init({BuildMeta, Platform}) ->
                    | {error, {listening, inet:port_number()}},
          NewState :: state().
 
-handle_call(ask_install, _, State) ->
-    Response = do_ask_install(State),
-    {reply, Response, State};
 handle_call(Unexpected, From, State) ->
     ok = tell(warning, "Unexpected call from ~tp: ~tp~n", [From, Unexpected]),
     {noreply, State}.
@@ -228,35 +221,6 @@ terminate(Reason, State) ->
 
 
 %%% Doers
-
-do_ask_install(#s{frame = Frame}) ->
-    Message =
-        "You want to run a node? EXCELLENT!\n\n"
-        "To run a node one must first be built.\n"
-        "Building a node requires a number of packages be available on the host "
-        "system in order for the node to be able to run. "
-        "To ensure that the necessary packages are installed please run the "
-        "following command as root or using the `sudo` command:\n\n"
-        "apt install gcc curl g++ dpkg-dev build-essential\\\n"
-        "    automake autoconf libncurses5-dev libssl-dev\\\n"
-        "    flex xsltproc wget vim git cmake libsodium-dev\\\n"
-        "    libgmp-dev",
-    ask_yes_no(Frame, Message).
-
-
-ask_yes_no(Frame, Message) ->
-    Text = io_lib:format("~ts", [Message]),
-    Style = {style, ?wxOK bor ?wxCANCEL},
-    Modal = wxMessageDialog:new(Frame, Text, [Style]),
-    Response =
-        case wxMessageDialog:showModal(Modal) of
-            ?wxID_OK     -> ok;
-            ?wxID_CANCEL -> cancel
-        end,
-    ok = wxMessageDialog:destroy(Modal),
-    Response.
-
-
 
 do_show(Terms, State = #s{console = Console}) ->
     ok = log(info, Terms),

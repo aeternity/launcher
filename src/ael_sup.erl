@@ -12,7 +12,7 @@
 %%% @end
 
 -module(ael_sup).
--vsn("0.1.0").
+-vsn("0.1.1").
 -behaviour(supervisor).
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").

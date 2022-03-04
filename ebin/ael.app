@@ -3,7 +3,7 @@
               {registered,[]},
               {included_applications,[]},
               {applications,[stdlib,kernel]},
-              {vsn,"0.1.0"},
+              {vsn,"0.1.1"},
               {modules,[ael,ael_builder,ael_con,ael_graph,ael_gui,ael_monitor,
                         ael_os,ael_sup,ael_v_chain,ael_v_conf,
                         ael_v_conf_editor,ael_v_dev,ael_v_mempool,
