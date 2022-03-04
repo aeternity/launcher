@@ -4,5 +4,8 @@
               {included_applications,[]},
               {applications,[stdlib,kernel]},
               {vsn,"0.1.0"},
-              {modules,[ael_con,ael_gui,ael_sup,ael]},
+              {modules,[ael,ael_builder,ael_con,ael_graph,ael_gui,ael_monitor,
+                        ael_os,ael_sup,ael_v_chain,ael_v_conf,
+                        ael_v_conf_editor,ael_v_dev,ael_v_mempool,
+                        ael_v_network,ael_v_node,ael_view]},
               {mod,{ael,[]}}]}.
