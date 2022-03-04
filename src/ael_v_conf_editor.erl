@@ -51,8 +51,6 @@ start_link(ConfMeta) ->
 
 
 init({Meta, Conf, Cores}) ->
-    tell(info, "Meta: ~p", [Meta]),
-    tell(info, "Conf: ~p", [Conf]),
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, "Edit Aeternity Node Configuration"),
 
@@ -147,7 +145,6 @@ build_schema(Schema, Conf, Parent, Sizer) ->
     lists:foldl(Render, #{}, ToRender).
 
 render({Key, Scheme, Conf}, Parent, Sizer, Elements) ->
-    tell(info, "Key: ~p, Conf: ~p", [Key, Conf]),
     Title =
         case string:lexemes(Key, "_") of
             ["http"] -> "HTTP";

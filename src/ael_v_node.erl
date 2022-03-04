@@ -18,7 +18,7 @@
 -behavior(ael_view).
 -behavior(wx_object).
 -include_lib("wx/include/wx.hrl").
--export([set_manifest/1, stat/1, ask_install/0]).
+-export([set_button/2, set_manifest/1, stat/1, ask_install/0]).
 -export([start_link/1, to_front/1]).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2,
@@ -55,17 +55,20 @@ to_front(Win) ->
     wx_object:cast(Win, to_front).
 
 
+-spec set_button(Text, Enabled) -> ok
+    when Text    :: string(),
+         Enabled :: boolean().
+
+set_button(Text, Enabled) ->
+    cast({set_button, Text, Enabled}).
+
+
 -spec set_manifest(Entries) -> ok
     when Entries :: [ael:conf_meta()].
 
 set_manifest(Entries) ->
-    case is_pid(whereis(?MODULE)) of
-        true ->
-            Names = [Name || #conf_meta{name = Name} <- Entries],
-            wx_object:cast(?MODULE, {set_manifest, Names});
-        false ->
-            ok
-    end.
+    Names = [Name || #conf_meta{name = Name} <- Entries],
+    cast({set_manifest, Names}).
 
 
 -spec stat([Element]) -> ok
@@ -78,11 +81,19 @@ set_manifest(Entries) ->
                   | {txpool,     non_neg_integer()}.
 
 stat(Elements) ->
-    wx_object:cast(?MODULE, {stat, Elements}).
+    cast({stat, Elements}).
 
 
 ask_install() ->
     wx_object:call(?MODULE, ask_install, infinity).
+
+
+
+cast(Message) ->
+    case is_pid(whereis(?MODULE)) of
+        true  -> wx_object:cast(?MODULE, Message);
+        false -> ok
+    end.
 
 
 
@@ -115,35 +126,9 @@ init(ConfNames) ->
     HeightSz = wxStaticBoxSizer:new(HeightBx, ?wxHORIZONTAL),
     HeightCt = wxTextCtrl:new(HeightBx, ?wxID_ANY, StatOpts),
 
-    TxPoolBx = wxStaticBox:new(Window, ?wxID_ANY, "TX Pool"),
-    TxPoolSz = wxStaticBoxSizer:new(TxPoolBx, ?wxVERTICAL),
-    TxPoolCt = wxTextCtrl:new(TxPoolBx, ?wxID_ANY, StatOpts),
-    _ = wxStaticBoxSizer:add(TxPoolSz, TxPoolCt, zxw:flags(base)),
-    TxPoolGrSz = wxBoxSizer:new(?wxVERTICAL),
-    TxPoolGr = ael_graph:new(TxPoolBx, TxPoolGrSz, "X", "Y"),
-    true = wxSizer:setItemMinSize(TxPoolGrSz, 0, {150, 150}),
-    TxPoolGrID = ael_graph:get_wx_id(TxPoolGr),
-    _ = wxStaticBoxSizer:add(TxPoolSz, TxPoolGrSz, zxw:flags(wide)),
-
-    DiffBx = wxStaticBox:new(Window, ?wxID_ANY, "Difficulty"),
-    DiffSz = wxStaticBoxSizer:new(DiffBx, ?wxVERTICAL),
-    DiffCt = wxTextCtrl:new(DiffBx, ?wxID_ANY, StatOpts),
-    _ = wxStaticBoxSizer:add(DiffSz, DiffCt, zxw:flags(base)),
-    DiffGrSz = wxBoxSizer:new(?wxVERTICAL),
-    DiffGr = ael_graph:new(DiffBx, DiffGrSz, "X", "Y"),
-    true = wxSizer:setItemMinSize(DiffGrSz, 0, {150, 150}),
-    DiffGrID = ael_graph:get_wx_id(DiffGr),
-    _ = wxStaticBoxSizer:add(DiffSz, DiffGrSz, zxw:flags(wide)),
-
-    PeerBx = wxStaticBox:new(Window, ?wxID_ANY, "Peer"),
-    PeerSz = wxStaticBoxSizer:new(PeerBx, ?wxVERTICAL),
-    PeerCt = wxTextCtrl:new(PeerBx, ?wxID_ANY, StatOpts),
-    _ = wxStaticBoxSizer:add(PeerSz, PeerCt, zxw:flags(base)),
-    PeerGrSz = wxBoxSizer:new(?wxVERTICAL),
-    PeerGr = ael_graph:new(PeerBx, PeerGrSz, "X", "Y"),
-    true = wxSizer:setItemMinSize(PeerGrSz, 0, {150, 150}),
-    PeerGrID = ael_graph:get_wx_id(PeerGr),
-    _ = wxStaticBoxSizer:add(PeerSz, PeerGrSz, zxw:flags(wide)),
+    {TxPoolSz, TxPoolCt, TxPoolGr, TxPoolGrID} = make_graph(Window, "TX Pool"),
+    {DiffSz,   DiffCt,   DiffGr,   DiffGrID}   = make_graph(Window, "Difficulty"),
+    {PeerSz,   PeerCt,   PeerGr,   PeerGrID}   = make_graph(Window, "Peers"),
 
     _ = wxStaticBoxSizer:add(HeightSz, HeightCt, [{flag, ?wxEXPAND}, {proportion, 1}]),
     _ = wxBoxSizer:add(StatSz,  HeightSz, [{flag, ?wxEXPAND}, {proportion, 0}]),
@@ -180,6 +165,19 @@ init(ConfNames) ->
                graphs    = Graphs},
     {Frame, State}.
 
+make_graph(Parent, Label) ->
+    StatOpts = [{value, "0"}, {style, ?wxTE_READONLY bor ?wxTE_RIGHT}],
+    StaticBox = wxStaticBox:new(Parent, ?wxID_ANY, Label),
+    Sizer = wxStaticBoxSizer:new(StaticBox, ?wxVERTICAL),
+    TextCtrl = wxTextCtrl:new(StaticBox, ?wxID_ANY, StatOpts),
+    _ = wxStaticBoxSizer:add(Sizer, TextCtrl, zxw:flags(base)),
+    GridSizer = wxBoxSizer:new(?wxVERTICAL),
+    Graph = ael_graph:new(StaticBox, GridSizer, "X", "Y"),
+    true = wxSizer:setItemMinSize(GridSizer, 0, {150, 150}),
+    ID = ael_graph:get_wx_id(Graph),
+    _ = wxStaticBoxSizer:add(Sizer, GridSizer, zxw:flags(wide)),
+    {Sizer, TextCtrl, Graph, ID}.
+
 
 -spec handle_call(Message, From, State) -> Result
     when Message  :: term(),
@@ -210,6 +208,9 @@ handle_call(Unexpected, From, State) ->
 handle_cast({stat, Elements}, State) ->
     NewState = lists:foldl(fun do_stat/2, State, Elements),
     {noreply, NewState};
+handle_cast({set_button, Text, Enabled}, State) ->
+    ok = do_set_button(Text, Enabled, State),
+    {noreply, State};
 handle_cast({set_manifest, Names}, State) ->
     ok = do_set_manifest(Names, State),
     {noreply, State};
@@ -317,19 +318,8 @@ terminate(Reason, State) ->
 %%% Doers
 
 do_ask_install(#s{frame = Frame}) ->
-    Message =
-        "You want to run a node? EXCELLENT!\n\n"
-        "To run a node one must first be built.\n"
-        "Building a node requires a number of packages be available on the host "
-        "system in order for the node to be able to run. "
-        "To ensure that the necessary packages are installed please run the "
-        "following command as root or using the `sudo` command:\n\n"
-        "apt install gcc curl g++ dpkg-dev build-essential\\\n"
-        "    automake autoconf libncurses5-dev libssl-dev\\\n"
-        "    flex xsltproc wget vim git cmake libsodium-dev\\\n"
-        "    libgmp-dev",
+    Message = build_notice(ael_con:platform()),
     ask_yes_no(Frame, Message).
-
 
 ask_yes_no(Frame, Message) ->
     Text = io_lib:format("~ts", [Message]),
@@ -342,6 +332,19 @@ ask_yes_no(Frame, Message) ->
         end,
     ok = wxMessageDialog:destroy(Modal),
     Response.
+
+build_notice(_) ->
+    "You want to run a node? EXCELLENT!\n\n"
+    "To run a node one must first be built.\n"
+    "Building a node requires a number of packages be available on the host "
+    "system in order for the node to be able to run. "
+    "To ensure that the necessary packages are installed please run the "
+    "following command as root or using the `sudo` command:\n\n"
+    "apt install gcc curl g++ dpkg-dev build-essential\\\n"
+    "    automake autoconf libncurses5-dev libssl-dev\\\n"
+    "    flex xsltproc wget vim git cmake libsodium-dev\\\n"
+    "    libgmp-dev".
+
 
 do_stat({height, Now},
         State = #s{sync = {true, Complete}, height_ct = HeightCt}) ->
@@ -402,6 +405,12 @@ update_graph(Name, G = {GraphIDs, Graphs}, Diff) ->
         error ->
             G
     end.
+
+
+do_set_button(Text, Enabled, #s{node_bn = NodeBn}) ->
+    _ = wxButton:setLabel(NodeBn, Text),
+    _ = wxButton:enable(NodeBn, [{enable, Enabled}]),
+    ok.
 
 
 do_set_manifest(Names, #s{conf_pk = ConfPk}) ->

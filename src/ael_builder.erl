@@ -57,13 +57,17 @@ check_git(Git, ERTS, none) ->
 
 clone_repo(Git, ERTS) ->
     "" = os:cmd("rm -rf aeternity"),
-    ok = ael_gui:ask_install(),
-    Command = "git clone https://github.com/aeternity/aeternity.git aeternity",
-    ok = ael_gui:show("Fetching code...\n"),
-    ok = ael_os:cmd(Command),
-    ok = file:set_cwd(Git),
-    ok = ael_os:cmd("git checkout " ++ ?tag),
-    check_build(Git, ERTS).
+    case ael_v_node:ask_install() of
+        ok ->
+            Command = "git clone https://github.com/aeternity/aeternity.git aeternity",
+            ok = ael_gui:show("Fetching code...\n"),
+            ok = ael_os:cmd(Command),
+            ok = file:set_cwd(Git),
+            ok = ael_os:cmd("git checkout " ++ ?tag),
+            check_build(Git, ERTS);
+        cancel ->
+            ael_con:build_cancelled()
+    end.
 
 check_build(Git, ERTS) ->
     BaseDir = filename:join(Git, "_build/prod/rel/aeternity"),
