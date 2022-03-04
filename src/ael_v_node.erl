@@ -10,7 +10,7 @@
 %%% @end
 
 -module(ael_v_node).
--vsn("0.1.0").
+-vsn("0.1.1").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
@@ -28,16 +28,16 @@
 
 
 -record(s,
-        {frame       = none         :: none | wx:wx_object(),
-         conf_pk     = none         :: none | wx:wx_object(),
-         node_bn     = none         :: none | wx:wx_object(),
-         height      = 0            :: non_neg_integer(),
-         sync        = {true, 0.1}  :: {true, float()} | false,
-         height_ct   = none         :: none | wx:wx_object(),
-         peer_ct     = none         :: none | wx:wx_object(),
-         diff_ct     = none         :: none | wx:wx_object(),
-         txpool_ct   = none         :: none | wx:wx_object(),
-         graphs      = {#{}, #{}}   :: {IDs :: map(), Graphs :: map()}}).
+        {frame     = none         :: none | wx:wx_object(),
+         conf_pk   = none         :: none | wx:wx_object(),
+         node_bn   = none         :: none | wx:wx_object(),
+         height    = 0            :: non_neg_integer(),
+         sync      = {true, 0.1}  :: {true, float()} | false,
+         height_ct = none         :: none | wx:wx_object(),
+         peer_ct   = none         :: none | wx:wx_object(),
+         diff_ct   = none         :: none | wx:wx_object(),
+         txpool_ct = none         :: none | wx:wx_object(),
+         graphs    = {#{}, #{}}   :: {IDs :: map(), Graphs :: map()}}).
 
 
 -type state() :: term().

@@ -8,7 +8,7 @@
 %%% @end
 
 -module(ael_v_conf_editor).
--vsn("0.1.0").
+-vsn("0.1.1").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
@@ -24,13 +24,13 @@
 
 
 -record(s,
-        {frame          = none         :: none | wx:wx_object(),
-         conf           = #{}          :: map(),
-         meta           = #conf_meta{} :: ael:conf_meta(),
-         name           = none         :: none | wx:object(),
-         memo           = none         :: none | wx:object(),
-         controls       = #{}          :: map(),
-         cores          = 2            :: pos_integer()}).
+        {frame    = none         :: none | wx:wx_object(),
+         conf     = #{}          :: map(),
+         meta     = #conf_meta{} :: ael:conf_meta(),
+         name     = none         :: none | wx:object(),
+         memo     = none         :: none | wx:object(),
+         controls = #{}          :: map(),
+         cores    = 2            :: pos_integer()}).
 
 
 -type state() :: term().

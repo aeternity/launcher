@@ -3,6 +3,6 @@
               {registered,[]},
               {included_applications,[]},
               {applications,[stdlib,kernel]},
-              {vsn,"0.1.0"},
+              {vsn,"0.1.1"},
               {modules,[ael_con,ael_gui,ael_sup,ael]},
               {mod,{ael,[]}}]}.
