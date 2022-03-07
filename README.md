@@ -8,7 +8,7 @@ AEL is in the experimental Alpha phase and is not yet cross platform.
 To run AEL you will need:
 - A Linux system (it can be made to work on OSX and BSD, but takes more care setting up the environment)
 - A full Erlang installation available (R23 or higher with WX enabled)
-- Aeternity build dependencies installed for your platform
+- Aeternity [build dependencies](https://github.com/aeternity/aeternity/blob/master/docs/build.md) installed for your platform
 - [ZX](https://zxq9.com/projects/zomp/qs.install.en.html) installed
 
 If the above requirements are met start AEL with `zx run ael`.
@@ -25,11 +25,11 @@ AEL started life as a quality of life tool for the Core Team, but has utility fo
 
 ## Roadmap
 - Developer tools
- - Local Sophia contract project compilation and deployment
- - GUI access to "dev mode"
- - Arbitrary test wallet functionality
- - Local test network management
- - Manage dev-mode forks from existing chains
+  - Local Sophia contract project compilation and deployment
+  - GUI access to "dev mode"
+  - Arbitrary test wallet functionality
+  - Local test network management
+  - Manage dev-mode forks from existing chains
 - Chain explorer
 - Mempool explorer
 - Mining configuration and graphical status reporting
