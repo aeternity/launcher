@@ -9,7 +9,7 @@
 %%% @end
 
 -module(ael_graph).
--vsn("0.1.1").
+-vsn("0.1.2").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
@@ -291,7 +291,7 @@ draw(Graph = #g{sizer = Sizer, canvas = Canvas, history = History,
 grid(Size) -> grid(-Size, Size).
 
 grid(N, Max) when N =< Max ->
-    ok = gl:vertex3f(N, 0.0,  Max),
+    ok = gl:vertex3f(N, 0.0, Max),
     ok = gl:vertex3f(N, 0.0, 0.0),
     ok = gl:vertex3f(N, Max, 0.0),
     ok = gl:vertex3f(N, 0.0, 0.0),

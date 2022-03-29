@@ -10,7 +10,7 @@
 %%% @end
 
 -module(ael_v_node).
--vsn("0.1.1").
+-vsn("0.1.2").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").

@@ -13,7 +13,7 @@
 %%% @end
 
 -module(ael_v_conf).
--vsn("0.1.1").
+-vsn("0.1.2").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
@@ -30,7 +30,8 @@
 -record(s,
         {frame    = none :: none | wx:wx_object(),
          selector = none :: none | wx:wx_object(),
-         selected = none :: none | non_neg_integer()}).
+         selected = none :: none | non_neg_integer(),
+         wx       = new  :: new | old}).
 
 
 -type state()  :: term().
@@ -97,7 +98,12 @@ init(Manifest) ->
     ok = wxFrame:connect(Selector, command_list_item_selected),
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
-    State = #s{frame = Frame, selector = Selector},
+    WX =
+        case erlang:system_info(otp_release) >= "24" of
+            true  -> new;
+            false -> old
+        end,
+    State = #s{frame = Frame, selector = Selector, wx = WX},
     {Frame, State}.
 
 
@@ -198,22 +204,34 @@ new() ->
     ael_con:show_ui({ael_v_conf_editor, ""}).
 
 
-edit(#s{selector = Selector, selected = Selected}) ->
-    Name = wxListCtrl:getItemText(Selector, Selected, [{col, 0}]),
+edit(#s{selector = Selector, selected = Selected, wx = WX}) ->
+    Name =
+        case WX of
+            new -> wxListCtrl:getItemText(Selector, Selected, [{col, 0}]);
+            old -> wxListCtrl:getItemText(Selector, Selected)
+        end,
     ael_con:show_ui({ael_v_conf_editor, Name}).
 
 
 drop(#s{selected = none}) ->
     ok;
-drop(#s{selector = Selector, selected = Selected}) ->
-    Name = wxListCtrl:getItemText(Selector, Selected, [{col, 0}]),
+drop(#s{selector = Selector, selected = Selected, wx = WX}) ->
+    Name =
+        case WX of
+            new -> wxListCtrl:getItemText(Selector, Selected, [{col, 0}]);
+            old -> wxListCtrl:getItemText(Selector, Selected)
+        end,
     ael_con:drop_conf(Name).
 
 
 export(#s{selected = none}) ->
     ok;
-export(#s{selector = Selector, selected = Selected}) ->
-    Name = wxListCtrl:getItemText(Selector, Selected, [{col, 0}]),
+export(#s{selector = Selector, selected = Selected, wx = WX}) ->
+    Name =
+        case WX of
+            new -> wxListCtrl:getItemText(Selector, Selected, [{col, 0}]);
+            old -> wxListCtrl:getItemText(Selector, Selected)
+        end,
     tell(info, "Would be exporting ~p", [Name]),
     ok.
 
