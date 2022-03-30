@@ -389,6 +389,7 @@ do_toggle_node(State = #s{node = stopped}, ConfName) ->
     {ok, NewState};
 do_toggle_node(State = #s{node = running}, _) ->
     NewState = stop_ae(State),
+    ok = ael_v_node:set_button(run, true),
     {running, NewState};
 do_toggle_node(State = #s{node = {buildig, _}}, _) ->
     {ok, State}.
