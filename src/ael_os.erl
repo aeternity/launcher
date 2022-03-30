@@ -6,7 +6,6 @@
 %%% @end
 
 -module(ael_os).
-
 -vsn("0.2.0").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").

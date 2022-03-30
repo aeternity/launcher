@@ -55,12 +55,12 @@ to_front(Win) ->
     wx_object:cast(Win, to_front).
 
 
--spec set_button(Text, Enabled) -> ok
-    when Text    :: string(),
+-spec set_button(Mode, Enabled) -> ok
+    when Mode    :: run | stop,
          Enabled :: boolean().
 
-set_button(Text, Enabled) ->
-    cast({set_button, Text, Enabled}).
+set_button(Mode, Enabled) ->
+    cast({set_button, Mode, Enabled}).
 
 
 -spec set_manifest(Entries) -> ok
@@ -208,8 +208,8 @@ handle_call(Unexpected, From, State) ->
 handle_cast({stat, Elements}, State) ->
     NewState = lists:foldl(fun do_stat/2, State, Elements),
     {noreply, NewState};
-handle_cast({set_button, Text, Enabled}, State) ->
-    ok = do_set_button(Text, Enabled, State),
+handle_cast({set_button, Mode, Enabled}, State) ->
+    ok = do_set_button(Mode, Enabled, State),
     {noreply, State};
 handle_cast({set_manifest, Names}, State) ->
     ok = do_set_manifest(Names, State),
@@ -407,9 +407,17 @@ update_graph(Name, G = {GraphIDs, Graphs}, Diff) ->
     end.
 
 
-do_set_button(Text, Enabled, #s{node_bn = NodeBn}) ->
+do_set_button(Mode, Enabled, #s{node_bn = NodeBn, conf_pk = ConfPk}) ->
+    {Text, Selector} =
+        case {Mode, Enabled} of
+            {run,  true}  -> {"Start Node", true};
+            {run,  false} -> {"Start Node", false};
+            {stop, true}  -> {"Stop Node",  false};
+            {stop, false} -> {"Stop Node",  false}
+        end,
     _ = wxButton:setLabel(NodeBn, Text),
     _ = wxButton:enable(NodeBn, [{enable, Enabled}]),
+    _ = wxChoice:enable(ConfPk, [{enable, Selector}]),
     ok.
 
 
@@ -431,7 +439,7 @@ do_set_manifest(Names, #s{conf_pk = ConfPk}) ->
 
 run_node(State = #s{conf_pk = ConfPk}) ->
     Selected = wxChoice:getStringSelection(ConfPk),
-    case ael_con:run_node(Selected) of
+    case ael_con:toggle_node(Selected) of
         ok      -> State;
         running -> State
     end.
