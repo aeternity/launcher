@@ -9,7 +9,7 @@
 {license,"ISC"}.
 {modules,[]}.
 {name,"Aeternity Launcher"}.
-{package_id,{"otpr","ael",{0,1,2}}}.
+{package_id,{"otpr","ael",{0,1,3}}}.
 {prefix,"ael"}.
 {repo_url,"https://github.com/aeternity/launcher"}.
 {tags,["aeternity","bitcoin","cryptocurrency","crypto","contract","ae"]}.

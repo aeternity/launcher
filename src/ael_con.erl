@@ -8,7 +8,7 @@
 %%% @end
 
 -module(ael_con).
--vsn("0.1.2").
+-vsn("0.1.3").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
@@ -17,7 +17,7 @@
 % General GUI interface
 -export([show_ui/1]).
 % Node GUI interface
--export([run_node/1, stop_ae/0, build_complete/4, build_cancelled/0]).
+-export([toggle_node/1, build_complete/4, build_cancelled/0]).
 % Config Interface
 -export([save_conf/3, read_conf/1, drop_conf/1]).
 % Utility functions
@@ -65,16 +65,10 @@
 
 %%% Interface
 
--spec run_node(ConfName :: string()) -> ok | running.
+-spec toggle_node(ConfName :: string()) -> ok | running.
 
-run_node(ConfName) ->
-    gen_server:call(?MODULE, {run_node, ConfName}).
-
-
--spec stop_ae() -> ok.
-
-stop_ae() ->
-    gen_server:cast(?MODULE, stop_ae).
+toggle_node(ConfName) ->
+    gen_server:call(?MODULE, {toggle_node, ConfName}).
 
 
 -spec build_complete(AEVer, ERTSVer, BaseDir, Deps) -> ok
@@ -214,8 +208,8 @@ generate_manifest(ManifestPath) ->
 
 %%% gen_server Message Handling Callbacks
 
-handle_call({run_node, ConfName}, _, State) ->
-    {Response, NewState} = do_run_node(State, ConfName),
+handle_call({toggle_node, ConfName}, _, State) ->
+    {Response, NewState} = do_toggle_node(State, ConfName),
     {reply, Response, NewState};
 handle_call({read_conf, Name}, _, State) ->
     Response = do_read_conf(Name, State),
@@ -244,9 +238,6 @@ handle_cast({build_complete, Builder, Meta}, State) ->
     {noreply, NewState};
 handle_cast(build_cancelled, State) ->
     NewState = do_build_cancelled(State),
-    {noreply, NewState};
-handle_cast(stop_ae, State) ->
-    NewState = do_stop_ae(State),
     {noreply, NewState};
 handle_cast(stop, State) ->
     ok = log(info, "Received a 'stop' message."),
@@ -389,18 +380,21 @@ write_conf({#conf_meta{path = Path}, Conf}) ->
     ok = file:write_file(Path, [JSON, "\n"]).
 
 
-do_run_node(State = #s{node = none, build = BuildMeta}, ConfName) ->
-    ok = ael_v_node:set_button("Run Node", false),
+do_toggle_node(State = #s{node = none, build = BuildMeta}, ConfName) ->
+    ok = ael_v_node:set_button(run, false),
     {ok, BPID} = ael_builder:start_link(BuildMeta),
     {ok, State#s{node = {building, BPID}, conf = ConfName}};
-do_run_node(State = #s{node = stopped}, ConfName) ->
+do_toggle_node(State = #s{node = stopped}, ConfName) ->
     NewState = start_node(State#s{conf = ConfName}),
     {ok, NewState};
-do_run_node(State, _) ->
-    {running, State}.
+do_toggle_node(State = #s{node = running}, _) ->
+    NewState = stop_ae(State),
+    {running, NewState};
+do_toggle_node(State = #s{node = {buildig, _}}, _) ->
+    {ok, State}.
 
 
-do_stop_ae(State = #s{node = running, loaded = Apps}) ->
+stop_ae(State = #s{node = running, loaded = Apps}) ->
     ok = ael_monitor:stop_poll(),
     Ignore =
         [aecore,
@@ -424,7 +418,7 @@ do_stop_ae(State = #s{node = running, loaded = Apps}) ->
     ok = lists:foreach(fun remove/1, AppsInOrder),
     ok = net_kernel:stop(),
     State#s{node = stopped, loaded = []};
-do_stop_ae(State) ->
+stop_ae(State) ->
     State.
 
 remove(App) ->
@@ -449,14 +443,13 @@ do_build_complete(_, _, State) ->
 
 
 do_build_cancelled(State = #s{node = {building, _}}) ->
-    ok = ael_v_node:set_button("Run Node", true),
+    ok = ael_v_node:set_button(run, true),
     State#s{node = none}.
 
 
 start_node(State = #s{base_dir = BaseDir,  deps     = Deps,
                       conf     = ConfName, manifest = Manifest}) ->
-%   ok = ael_v_node:set_button("Stop Node", true),
-    ok = ael_v_node:set_button("Run Node", false),
+    ok = ael_v_node:set_button(stop, true),
     Selected = lists:keyfind(ConfName, #conf_meta.name, Manifest),
     #conf_meta{path = ConfPath, data = DataPath} = Selected,
     true = os:putenv("AETERNITY_CONFIG", ConfPath),
