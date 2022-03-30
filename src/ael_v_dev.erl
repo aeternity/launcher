@@ -5,7 +5,7 @@
 %%% @end
 
 -module(ael_v_dev).
--vsn("0.1.2").
+-vsn("0.2.0").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
@@ -23,6 +23,9 @@
 -record(s,
         {frame = none :: none | wx:wx_object(),
          text  = none :: none | wx:wx_object()}).
+
+-define(OPEN, 10).
+-define(SAVE, 11).
 
 
 % -type state() :: term().
@@ -45,12 +48,24 @@ init(Title) ->
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, Title),
     MainSz = wxBoxSizer:new(?wxVERTICAL),
+    ButtonSz = wxBoxSizer:new(?wxHORIZONTAL),
+
+    OpenBn = wxButton:new(Frame, ?OPEN, [{label, "Open"}]),
+    SaveBn = wxButton:new(Frame, ?SAVE, [{label, "Save"}]),
+    _ = wxSizer:add(ButtonSz, OpenBn, zxw:flags(wide)),
+    _ = wxSizer:add(ButtonSz, SaveBn, zxw:flags(wide)),
+
     TextC = wxTextCtrl:new(Frame, ?wxID_ANY, [{style, ?wxDEFAULT bor ?wxTE_MULTILINE}]),
+    Mono = wxFont:new(8, ?wxMODERN, ?wxNORMAL, ?wxNORMAL, [{face, "Monospace"}]),
+    true = wxTextCtrl:setFont(TextC, Mono),
+
+    wxSizer:add(MainSz, ButtonSz),
     wxSizer:add(MainSz, TextC, [{flag, ?wxEXPAND}, {proportion, 1}]),
     wxFrame:setSizer(Frame, MainSz),
     wxSizer:layout(MainSz),
 
     ok = wxFrame:connect(Frame, close_window),
+    ok = wxFrame:connect(Frame, command_button_clicked),
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
     State = #s{frame = Frame, text = TextC},
@@ -78,6 +93,13 @@ handle_info(Unexpected, State) ->
     {noreply, State}.
 
 
+handle_event(#wx{id = ID, event = #wxCommand{type = command_button_clicked}}, State) ->
+    ok =
+        case ID of
+            ?OPEN -> tell(info, "Opening!");
+            ?SAVE -> tell(info, "Saving!")
+        end,
+    {noreply, State};
 handle_event(#wx{event = #wxClose{}}, State = #s{frame = Frame}) ->
     ok = wxWindow:destroy(Frame),
     {noreply, State};

@@ -17,7 +17,7 @@
 %%% @end
 
 -module(ael_gui).
--vsn("0.1.2").
+-vsn("0.2.0").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
@@ -80,7 +80,7 @@ init({BuildMeta, Platform}) ->
          {"Chain Explorer",      ael_v_chain},
          {"Network Explorer",    ael_v_network},
          {"Mempool Explorer",    ael_v_mempool}],
-    Disable = [ael_v_dev, ael_v_chain, ael_v_network, ael_v_mempool],
+    Disable = [ael_v_chain, ael_v_network, ael_v_mempool],
 
     MakeButton =
         fun({Label, Mod}) ->
