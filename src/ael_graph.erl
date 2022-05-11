@@ -323,7 +323,7 @@ bars(_, _, _, _, _) ->
     [].
 
 scale(Value, Min, Max) ->
-    Magnitude = max(abs(Min), abs(Max)),
+    Magnitude = max(1, max(abs(Min), abs(Max))),
     (Value * 1.5) / Magnitude.
 
 -spec destroy(graph()) -> ok.
