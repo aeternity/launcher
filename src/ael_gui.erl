@@ -17,7 +17,7 @@
 %%% @end
 
 -module(ael_gui).
--vsn("0.1.3").
+-vsn("0.1.4").
 -author("Craig Everett <zxq9@zxq9.com>").
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
