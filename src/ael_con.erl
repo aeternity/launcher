@@ -680,9 +680,16 @@ uname_r() ->
 
 
 core_count() ->
-    Count = core_count(erlang:system_info(cpu_topology), 0),
-    ok = tell("Core count: ~w", [Count]),
-    Count.
+    case erlang:system_info(cpu_topology) of
+        undefined ->
+            Count = erlang:system_info(logical_processors_available),
+            ok = tell("Core count: ~w", [Count]),
+            Count;
+        Topology ->
+            Count = core_count(Topology, 0),
+            ok = tell("Core count: ~w", [Count]),
+            Count
+    end.
 
 core_count([], C) ->
     C;
