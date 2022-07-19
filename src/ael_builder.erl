@@ -16,90 +16,65 @@
 -copyright("Craig Everett <zxq9@zxq9.com>").
 -license("ISC").
 
--define(tag, "v6.4.0").
--define(ver, "6.4.0").
+-define(sophia_ver, {6, 1, 0}).
+-define(aecore_ver, {6, 5, 2}).
+-define(sophia_url,
+        "https://github.com/aeternity/aesophia/archive/refs/tags/v6.1.0.tar.gz").
+-define(ae_core_url,
+        "https://github.com/aeternity/aeternity/archive/refs/tags/v6.5.2.tar.gz").
 
--export([start_link/1]).
+-export([start_link/1, aecore_ok/1, sophia_ok/1]).
 -include("$zx_include/zx_logger.hrl").
 
 %%% Interface
 
--spec start_link(BuildMeta :: term()) -> {ok, pid()}.
+-spec start_link(Dir :: file:filename()) -> {ok, pid()}.
 
-start_link(BuildMeta) ->
-    BPID = spawn_link(fun() -> init(BuildMeta) end),
+start_link(Dir) ->
+    BPID = spawn_link(fun() -> build(Dir) end),
     {ok, BPID}.
 
-init(BuildMeta) ->
+build(Dir) ->
+    tell(info, "Dir: ~p", [Dir]),
+    ok = filelib:ensure_dir(Dir),
+    ok = file:set_cwd(Dir),
+    ok = ael_gui:show("Building AE Core and Sophia in " ++ Dir ++ "...\n"),
+    AECoreFile = "aeternity-" ++ filename:basename(?ae_core_url),
+    SophiaFile = "sophia-" ++ filename:basename(?sophia_url),
+    "" = os:cmd(wget_cmd(AECoreFile, ?ae_core_url)),
+    "" = os:cmd(wget_cmd(SophiaFile, ?sophia_url)),
+    AECoreDir = unpack(AECoreFile),
+    SophiaDir = unpack(SophiaFile),
+    {ok, _} = file:copy(filename:join(AECoreDir, "rebar3"),
+                        filename:join(SophiaDir, "rebar3")),
+    ok = ael_os:cmd(AECoreDir, "make prod-build"),
+    ok = ael_os:cmd(SophiaDir, "./rebar3 release"),
+    AECoreBuild = filename:join(AECoreDir, "_build/prod/rel/aeternity/"),
+    SophiaBuild = filename:join(SophiaDir, "_build/default/rel/aesophia"),
+    AECore = {?aecore_ver, AECoreBuild},
+    Sophia = {?sophia_ver, SophiaBuild},
     ERTS = erlang:system_info(version),
-    ok = ael_gui:show("Checking for presence of local node...\n"),
-    Var = ael_con:var(),
-    Git = filename:join(Var, "aeternity"),
-    ok = filelib:ensure_dir(Git),
-    ok = file:set_cwd(Var),
-    check_git(Git, ERTS, BuildMeta).
+    ael_con:build_complete(AECore, Sophia, ERTS).
 
-check_git(Git, ERTS, {?ver, ERTS}) ->
-    case file:set_cwd(Git) of
-        ok              -> check_build(Git, ERTS);
-        {error, enoent} -> clone_repo(Git, ERTS)
-    end;
-check_git(Git, ERTS, {AEVer, OldERTS}) ->
-    Format = "Built: AE ~s with ERTS ~s. Rebuilding as AE ~s with ERTS ~s.~n",
-    Message = io_lib:format(Format, [AEVer, OldERTS, ?ver, ERTS]),
-    ok = ael_gui:show(Message),
-    clone_repo(Git, ERTS);
-check_git(Git, ERTS, none) ->
-    Format = "No local node built yet. Initiating build of AE ~s with ERTS ~s~n",
-    Message = io_lib:format(Format, [?ver, ERTS]),
-    ok = ael_gui:show(Message),
-    clone_repo(Git, ERTS).
+wget_cmd(Out, URL) ->
+    "wget --quiet --no-clobber --output-document " ++ Out ++ " " ++ URL.
 
-clone_repo(Git, ERTS) ->
-    "" = os:cmd("rm -rf aeternity"),
-    case ael_v_node:ask_install() of
-        ok ->
-            Command = "git clone https://github.com/aeternity/aeternity.git aeternity",
-            ok = ael_gui:show("Fetching code...\n"),
-            ok = ael_os:cmd(Command),
-            ok = file:set_cwd(Git),
-            ok = ael_os:cmd("git checkout " ++ ?tag),
-            check_build(Git, ERTS);
-        cancel ->
-            ael_con:build_cancelled()
-    end.
+rm_cmd(Target) ->
+    "rm -rf " ++ Target.
 
-check_build(Git, ERTS) ->
-    BaseDir = filename:join(Git, "_build/prod/rel/aeternity"),
-    RELEASES = filename:join(BaseDir, "releases/RELEASES"),
-    case file:consult(RELEASES) of
-        {ok, [[{release, "aeternity", ?ver, ERTS, Deps, permanent}]]} ->
-            ok = ael_gui:show("Build successful!\n"),
-            great_success(?ver, ERTS, BaseDir, Deps);
-        {ok, [[{release, "aeternity", ?ver, BadERTS, _, permanent}]]} ->
-            Format = "Erlang version mismatch: ~s VS ~s~n",
-            Message = io_lib:format(Format, [BadERTS, ERTS]),
-            ok = ael_gui:show(Message),
-            ok = ael_gui:show("Running `make clean` and rebilding...\n"),
-            ok = ael_os:cmd(Git, "make clean"),
-            check_build(Git, ERTS);
-        {ok, [[{release, "aeternity", OhNoVer, ERTS, _, permanent}]]} ->
-            Format = "Aeternity version mismatch: ~p VS ~p~n",
-            Message = io_lib:format(Format, [OhNoVer, ?ver]),
-            ok = ael_gui:show(Message),
-            ok = ael_gui:show("Running a make clean and rebild...\n"),
-            ok = ael_os:cmd(Git, "make clean"),
-            check_build(Git, ERTS);
-        {error, enoent} ->
-            ok = ael_gui:show("Building Aeternity node...\n"),
-            ok = ael_os:cmd(Git, "make prod-build"),
-            check_build(Git, ERTS);
-        WeirdPoo ->
-            ok = ael_gui:show("Received weird poo:"),
-            StringyPoo = io_lib:format("~tp", [WeirdPoo]),
-            ok = ael_gui:show(StringyPoo),
-            {error, mismatch, WeirdPoo}
-    end.
+unpack(File) ->
+    {ok, ["pax_global_header", DirName | _]} = erl_tar:table(File, [compressed]),
+    "" = os:cmd(rm_cmd(DirName)),
+    ok = erl_tar:extract(File, [compressed]),
+    true = filelib:is_dir(DirName),
+    {ok, CWD} = file:get_cwd(),
+    filename:join(CWD, DirName).
 
-great_success(AEVer, ERTS, BaseDir, Deps) ->
-    ael_con:build_complete(AEVer, ERTS, BaseDir, Deps).
+
+aecore_ok(?aecore_ver) -> true;
+aecore_ok({_, _, _})   -> obsolete;
+aecore_ok(none)        -> false.
+
+sophia_ok(?sophia_ver) -> true;
+sophia_ok({_, _, _})   -> obsolete;
+sophia_ok(none)        -> false.

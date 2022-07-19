@@ -63,11 +63,12 @@ set_manifest(Entries) ->
 
 %%% Startup Functions
 
-start_link(Manifest) ->
-    wx_object:start_link({local, ?MODULE}, ?MODULE, Manifest, []).
+start_link(Args) ->
+    wx_object:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
 
-init(Manifest) ->
+init(Args) ->
+    Manifest = proplists:get_value(manifest, Args, []),
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, "Aeternity Configuration"),
 
@@ -96,7 +97,7 @@ init(Manifest) ->
     ok = wxFrame:connect(Frame, close_window),
     ok = wxFrame:connect(Frame, command_button_clicked),
     ok = wxFrame:connect(Selector, command_list_item_selected),
-    ok = wxFrame:center(Frame),
+    ok = set_rect(Frame, Args),
     true = wxFrame:show(Frame),
     WX =
         case erlang:system_info(otp_release) >= "24" of
@@ -105,6 +106,13 @@ init(Manifest) ->
         end,
     State = #s{frame = Frame, selector = Selector, wx = WX},
     {Frame, State}.
+
+set_rect(Frame, Args) ->
+    case proplists:get_value(rect, Args, none) of
+        none -> wxFrame:center(Frame);
+        Rect -> wxWindow:setSize(Frame, Rect)
+    end.
+
 
 
 -spec handle_call(Message, From, State) -> Result
@@ -250,5 +258,8 @@ do_set_manifest(Entries, #s{selector = Selector}) ->
 
 
 close(State = #s{frame = Frame}) ->
+    {X, Y} = wxWindow:getPosition(Frame),
+    {W, H} = wxWindow:getSize(Frame),
+    ok = ael_con:save_rect(?MODULE, {X, Y, W, H}),
     ok = wxWindow:destroy(Frame),
     State.

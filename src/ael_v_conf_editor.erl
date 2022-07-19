@@ -50,7 +50,7 @@ start_link(ConfMeta) ->
     wx_object:start_link(?MODULE, ConfMeta, []).
 
 
-init({Meta, Conf, Cores}) ->
+init([{conf, {Meta, Conf, Cores}}]) ->
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, "Edit Aeternity Node Configuration"),
 

@@ -21,7 +21,9 @@
 -type platform()   :: {System :: {OS :: atom(), Version :: string() | unknown},
                        OTP    :: string(),
                        ERTS   :: string()}.
--type build_meta() :: {AE_Version :: string(), ERTS_Version :: string()}.
+-type build_meta() :: {ERTS_Version   :: string(),
+                       AE_Version     :: none | tuple(),
+                       Sophia_Version :: none | tuple()}.
 
 
 %%% Interface

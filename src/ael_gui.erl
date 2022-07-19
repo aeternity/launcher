@@ -25,7 +25,7 @@
 -behavior(wx_object).
 -include_lib("wx/include/wx.hrl").
 -export([show/1]).
--export([start_link/2]).
+-export([start_link/4, await_build/0, stop/0]).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2,
          handle_event/2, handle_sync_event/3]).
@@ -33,9 +33,12 @@
 
 
 -record(s,
-        {frame   = none :: none | wx:wx_object(),
-         buttons = []   :: [button()],
-         console = none :: none | wx:wx_object()}).
+        {frame    = none  :: none | wx:wx_object(),
+         buttons  = []    :: [button()],
+         console  = none  :: none | wx:wx_object(),
+         ae_core  = false :: boolean(),
+         sophia   = false :: boolean(),
+         platform = none  :: none | ael:platform()}).
 
 -record(button,
         {name = none :: none | module(),
@@ -43,7 +46,7 @@
          wx   = none :: none | wx:wx_object()}).
 
 
--type state()  :: #s{}.
+% -type state()  :: #s{}.
 -type button() :: #button{}.
 
 
@@ -55,31 +58,91 @@ show(Terms) ->
     wx_object:cast(?MODULE, {show, Terms}).
 
 
+-spec await_build() -> ok.
 
-%%% Startup Functions
+await_build() ->
+    wx_object:cast(?MODULE, await_build).
 
--spec start_link(BuildMeta, Platform) -> Result
-    when BuildMeta :: ael:build_meta(),
+
+
+%%% Lifecycle Functions
+
+-spec start_link(BuildERTS, AECore, Sophia, Platform) -> Result
+    when BuildERTS :: string(),
+         AECore    :: none | {zx:version(), file:filename()},
+         Sophia    :: none | {zx:version(), file:filename()},
          Platform  :: ael:platform(),
          Result    :: wx:wx_object() | {error, Reason :: term()}.
 
-start_link(BuildMeta, Platform) ->
-    wx_object:start_link({local, ?MODULE}, ?MODULE, {BuildMeta, Platform}, []).
+start_link(BuildERTS, AECore, Sophia, Platform) ->
+    Args = {BuildERTS, AECore, Sophia, Platform},
+    wx_object:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
 
-init({BuildMeta, Platform}) ->
+-spec stop() -> ok.
+
+stop() ->
+    wx_object:cast(?MODULE, stop).
+
+
+init({BuildERTS, AECore, Sophia, Platform = {{OS, Version}, OTP, ERTS}}) ->
     ok = log(info, "GUI starting..."),
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, "ÆL"),
     MainSz = wxBoxSizer:new(?wxVERTICAL),
 
+    {AEcoreString, AEcoreOK} =
+        case AECore of
+            {A_V = {AX, AY, AZ}, _} ->
+                A_OK = ael_builder:aecore_ok(A_V),
+                A_Format =
+                    case A_OK of
+                        true ->
+                            "Build: AE v~w.~w.~w built with ERTS ~s.~n";
+                        obsolete ->
+                            "Build: AE v~w.~w.~w built with ERTS ~s. (OBSOLETE)~n"
+                    end,
+                A_St = io_lib:format(A_Format, [AX, AY, AZ, BuildERTS]),
+                {A_St, A_OK};
+            none ->
+                {"No AE node is currently built.\n", false}
+        end,
+    {SophiaString, SophiaOK} =
+        case Sophia of
+            {S_V = {SX, SY, SZ}, _} ->
+                S_OK = ael_builder:sophia_ok(S_V),
+                S_Format =
+                    case S_OK of
+                        true     -> "Sophia: v~w.~w.~w.~n";
+                        obsolete -> "Sophia: v~w.~w.~w. (OBSOLETE)~n"
+                    end,
+                S_St = io_lib:format(S_Format, [SX, SY, SZ]),
+                {S_St, S_OK};
+            none  ->
+                {"No Sophia compiler is currently built.\n", false}
+        end,
+
+    SameERTS = ERTS =:= BuildERTS,
     ButtonConf =
-        [{"Configurator",        ael_v_conf},
-         {"Run Local Node",      ael_v_node},
-         {"Developer Workbench", ael_v_dev},
-         {"Chain Explorer",      ael_v_chain},
-         {"Network Explorer",    ael_v_network},
-         {"Mempool Explorer",    ael_v_mempool}],
+        case AEcoreOK =:= true andalso SophiaOK =:= true andalso SameERTS of
+            true ->
+                [{"Configurator",        ael_v_conf},
+                 {"Run Local Node",      ael_v_node},
+                 {"Developer Workbench", ael_v_dev},
+                 {"Chain Explorer",      ael_v_chain},
+                 {"Network Explorer",    ael_v_network},
+                 {"Mempool Explorer",    ael_v_mempool}];
+            false ->
+                BuildLabel =
+                    case {AEcoreOK, SophiaOK, SameERTS} of
+                        {false, false, _} -> "BUILD AETERNITY";
+                        {obsolete, _, _}  -> "RE-BUILD AETERNITY";
+                        {_, obsolete, _}  -> "RE-BUILD AETERNITY";
+                        {_, _, false}     -> "RE-BUILD AETERNITY";
+                        {_, _, _}         -> "(RE)BUILD AETERNITY"
+                    end,
+                [{BuildLabel, ael_builder}]
+        end,
     Disable = [ael_v_chain, ael_v_network, ael_v_mempool],
 
     MakeButton =
@@ -104,7 +167,7 @@ init({BuildMeta, Platform}) ->
     _ = wxSizer:add(MainSz, Console, zxw:flags(wide)),
 
     _ = wxFrame:setSizer(Frame, MainSz),
-    ok = wxFrame:setSize(Frame, {500, 500}),
+    ok = wxFrame:setSize(Frame, {700, 500}),
     _ = wxSizer:layout(MainSz),
 
     ok = wxFrame:connect(Frame, close_window),
@@ -112,99 +175,60 @@ init({BuildMeta, Platform}) ->
     ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
 
-    BuildString =
-        case BuildMeta of
-            {AEVer, ERTSVer} ->
-                F = "Current build: AE ~s built with ERTS ~s.~n",
-                io_lib:format(F, [AEVer, ERTSVer]);
-            none ->
-                "No AE node is currently built.\n"
-        end,
-    {{OS, Version}, OTP, ERTS} = Platform,
-    Format =
+    PF =
         "OS: ~p-~s~n"
         "OTP R~s (v~s)~n",
-    PlatformString = io_lib:format(Format, [OS, Version, OTP, ERTS]),
-    ok = wxTextCtrl:appendText(Console, BuildString),
+    PlatformString = io_lib:format(PF, [OS, Version, OTP, ERTS]),
+    ok = wxTextCtrl:appendText(Console, AEcoreString),
+    ok = wxTextCtrl:appendText(Console, SophiaString),
     ok = wxTextCtrl:appendText(Console, PlatformString),
 
-    State = #s{frame = Frame, buttons = Buttons, console = Console},
+    State = #s{frame   = Frame,    buttons = Buttons, console  = Console,
+               ae_core = Platform, sophia  = Sophia,  platform = Platform},
     {Frame, State}.
 
-
--spec handle_call(Message, From, State) -> Result
-    when Message  :: term(),
-         From     :: {pid(), reference()},
-         State    :: state(),
-         Result   :: {reply, Response, NewState}
-                   | {noreply, State},
-         Response :: ok
-                   | {error, {listening, inet:port_number()}},
-         NewState :: state().
 
 handle_call(Unexpected, From, State) ->
     ok = tell(warning, "Unexpected call from ~tp: ~tp~n", [From, Unexpected]),
     {noreply, State}.
 
 
--spec handle_cast(Message, State) -> {noreply, NewState}
-    when Message  :: term(),
-         State    :: state(),
-         NewState :: state().
-%% @private
-%% The gen_server:handle_cast/2 callback.
-%% See: http://erlang.org/doc/man/gen_server.html#Module:handle_cast-2
-
 handle_cast({show, Terms}, State) ->
     NewState = do_show(Terms, State),
     {noreply, NewState};
+handle_cast(await_build, State) ->
+    NewState = do_await_build(State),
+    {noreply, NewState};
+handle_cast(stop, State = #s{frame = Frame}) ->
+    ok = wxFrame:destroy(Frame),
+    {noreply, State};
 handle_cast(Unexpected, State) ->
     ok = tell(warning, "Unexpected cast: ~tp~n", [Unexpected]),
     {noreply, State}.
 
-
--spec handle_info(Message, State) -> {noreply, NewState}
-    when Message  :: term(),
-         State    :: state(),
-         NewState :: state().
-%% @private
-%% The gen_server:handle_info/2 callback.
-%% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
 
 handle_info(Unexpected, State) ->
     ok = tell(warning, "Unexpected info: ~tp~n", [Unexpected]),
     {noreply, State}.
 
 
--spec handle_event(Event, State) -> {noreply, NewState}
-    when Event    :: term(),
-         State    :: state(),
-         NewState :: state().
-%% @private
-%% The wx_object:handle_event/2 callback.
-%% See: http://erlang.org/doc/man/gen_server.html#Module:handle_info-2
-
 handle_event(#wx{id = ID, event = #wxCommand{type = command_button_clicked}},
              State = #s{buttons = Buttons}) ->
     ok =
         case lists:keyfind(ID, #button.id, Buttons) of
-            #button{name = Name} -> ael_con:show_ui(Name);
-            false                -> ok
+            #button{name = ael_builder} -> ask_build_ae(State);
+            #button{name = Name}        -> ael_con:show_ui(Name);
+            false                       -> ok
         end,
     {noreply, State};
-handle_event(#wx{event = #wxClose{}}, State) ->
-    NewState = close(State),
-    {noreply, NewState};
+handle_event(#wx{event = #wxClose{}}, State = #s{frame = Frame}) ->
+    ok = ael_con:stop(),
+    ok = wxFrame:destroy(Frame),
+    {noreply, State};
 handle_event(Event, State) ->
     ok = tell(info, "Unexpected event ~tp State: ~tp~n", [Event, State]),
     {noreply, State}.
 
-
--spec handle_sync_event(Event, Ref, State) -> ok | noreply | Error
-    when Event :: #wx{},
-         Ref   :: term(),
-         State :: term(),
-         Error :: term().
 
 handle_sync_event(Event, Ref, State) ->
     Message = "Unexpected sync event ~tp (ref: ~tp) State: ~tp~n",
@@ -222,6 +246,104 @@ terminate(Reason, State) ->
 
 %%% Doers
 
+ask_build_ae(#s{frame = Frame, platform = {OS, _, _}}) ->
+    {Message, Supported} = check(OS),
+    case ask_yes_no(Frame, Message, Supported) of
+        ok     -> ael_con:build();
+        cancel -> ok
+    end.
+
+
+ask_yes_no(Frame, Message, true) ->
+    Text = io_lib:format("~ts", [Message]),
+    Style = {style, ?wxOK bor ?wxCANCEL},
+    Modal = wxMessageDialog:new(Frame, Text, [Style]),
+    Response =
+        case wxMessageDialog:showModal(Modal) of
+            ?wxID_OK     -> ok;
+            ?wxID_CANCEL -> cancel
+        end,
+    ok = wxMessageDialog:destroy(Modal),
+    Response;
+ask_yes_no(Frame, Message, false) ->
+    Text = io_lib:format("~ts", [Message]),
+    Style = {style, ?wxCANCEL},
+    Modal = wxMessageDialog:new(Frame, Text, [Style]),
+    ?wxID_CANCEL = wxMessageDialog:showModal(Modal),
+    ok = wxMessageDialog:destroy(Modal),
+    cancel.
+
+check({devuan, _})  -> {build_notice(debian),  true};
+check({debian, _})  -> {build_notice(debian),  true};
+check({ubuntu, _})  -> {build_notice(debian),  true};
+check({gentoo, _})  -> {build_notice(linux),   true};
+check({arch, _})    -> {build_notice(linux),   true};
+check({slack, _})   -> {build_notice(linux),   true};
+check({fedora, _})  -> {build_notice(linux),   true};
+check({rhel, _})    -> {build_notice(linux),   true};
+check({suse, _})    -> {build_notice(linux),   true};
+check({unix, _})    -> {build_notice(unix),    true};
+check({osx, _})     -> {build_notice(osx),     true};
+check({windows, _}) -> {build_notice(windows), false};
+check({unknown, _}) -> {build_notice(unknown), false}.
+
+build_notice(debian) ->
+    "Building a node requires a number of packages be available on the host "
+    "system in order for the node to be able to run.\n"
+    "To ensure that the necessary packages are installed please run the "
+    "following command as root or using the `sudo` command:\n\n"
+    "apt install gcc curl g++ dpkg-dev build-essential\\\n"
+    "    automake autoconf libncurses5-dev libssl-dev\\\n"
+    "    flex xsltproc wget vim git cmake libsodium-dev\\\n"
+    "    libgmp-dev\n\n"
+    "After installing the required packages, press 'OK' below.";
+build_notice(linux) ->
+    "Building a node requires a number of packages be available on the host "
+    "system in order for the node to be able to build and run.\n"
+    "Unfortunately this Aeternity launcher project is still in its infancy "
+    "and we do not (yet) have complete copy-paste level instructions available for "
+    "how you should install the necessary packages. We do have, however, an "
+    "accurate list of build dependencies listed below. The names listed here are "
+    "the package names by which they are known in Debian-flavored repos. Your distro "
+    "may have some slight naming differences.\n\n"
+    "The necessary packages are:\n"
+    "  - gcc\n"
+    "  - curl\n"
+    "  - g++\n"
+    "  - build-essential (NOTE: this may represent several packages on your system)\n"
+    "  - automake\n"
+    "  - autoconf\n"
+    "  - libncurses5-dev\n"
+    "  - libssl-dev\n"
+    "  - flex\n"
+    "  - xsltproc\n"
+    "  - wget\n"
+    "  - vim\n"
+    "  - git\n"
+    "  - cmake\n"
+    "  - libsodium-dev\n"
+    "  - libgmp-dev\n\n"
+    "After installing the required packages, press 'OK' below.";
+build_notice(unix) ->
+    build_notice(linux);
+build_notice(osx) ->
+    build_notice(linux);
+build_notice(windows) ->
+    "Unfortunately building on Windows is not yet supported by this launcher, but "
+    "support is planned in the future.";
+build_notice(unknown) ->
+    "The launcher has had trouble figuring out what platform you are on and so cannot "
+    "plan an accurate build procedure.\n"
+    "If you would like to help us support your platform please get in touch!\n"
+    "The author's email is: ceverett@tsuriai.jp\n"
+    "Thank you!".
+
+
+do_await_build(State = #s{buttons = [#button{wx = Button}]}) ->
+    _ = wxButton:disable(Button),
+    State.
+
+
 do_show(Terms, State = #s{console = Console}) ->
     ok = log(info, Terms),
     String =
@@ -230,10 +352,4 @@ do_show(Terms, State = #s{console = Console}) ->
             false -> io_lib:format("~tw~n", [Terms])
         end,
     ok = wxTextCtrl:appendText(Console, unicode:characters_to_list(String)),
-    State.
-
-
-close(State = #s{frame = Frame}) ->
-    ok = ael_con:stop(),
-    ok = wxFrame:destroy(Frame),
     State.

@@ -18,7 +18,7 @@
 -behavior(ael_view).
 -behavior(wx_object).
 -include_lib("wx/include/wx.hrl").
--export([set_button/2, set_manifest/1, stat/1, ask_install/0]).
+-export([set_button/2, set_manifest/1, stat/1]).
 -export([start_link/1, to_front/1]).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2,
@@ -42,8 +42,7 @@
 
 -type state() :: term().
 
--define(CONF, 11).
--define(NODE, 12).
+-define(NODE, 10).
 
 
 %%% Interface functions
@@ -84,10 +83,9 @@ stat(Elements) ->
     cast({stat, Elements}).
 
 
-ask_install() ->
-    wx_object:call(?MODULE, ask_install, infinity).
-
-
+-spec cast(Message) -> ok
+    when Message :: term().
+%% Generic safe cast (always checks to find the PID)
 
 cast(Message) ->
     case is_pid(whereis(?MODULE)) of
@@ -99,11 +97,11 @@ cast(Message) ->
 
 %%% Startup Functions
 
-start_link(ConfNames) ->
-    wx_object:start_link({local, ?MODULE}, ?MODULE, ConfNames, []).
+start_link(Args) ->
+    wx_object:start_link({local, ?MODULE}, ?MODULE, Args, []).
 
 
-init(ConfNames) ->
+init(Args) ->
     ok = log(info, "GUI starting..."),
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, "Local ÆL Node"),
@@ -116,6 +114,7 @@ init(ConfNames) ->
     StatSz = wxBoxSizer:new(?wxVERTICAL),
 
     NodeBn = wxButton:new(Window, ?NODE, [{label, "Run Node"}]),
+    ConfNames = proplists:get_value(manifest, Args, []),
     ConfPk = wxChoice:new(Window, ?wxID_ANY, [{choices, ConfNames}]),
     ok = wxChoice:setSelection(ConfPk, 0),
     _ = wxSizer:add(ButtSz, NodeBn, zxw:flags(base)),
@@ -141,12 +140,11 @@ init(ConfNames) ->
     _ = wxScrolledWindow:setSizerAndFit(Window, MainSz),
     ok = wxScrolledWindow:setScrollRate(Window, 0, 5),
     _ = wxFrame:setSizer(Frame, FrameSz),
-    ok = wxFrame:setSize(Frame, {510, 700}),
+    ok = set_rect(Frame, Args),
     _ = wxSizer:layout(FrameSz),
 
     ok = wxFrame:connect(Frame, close_window),
     ok = wxFrame:connect(Frame, command_button_clicked),
-    ok = wxFrame:center(Frame),
     true = wxFrame:show(Frame),
     {ok, DiffGrI} = ael_graph:show(DiffGr),
     {ok, PeerGrI} = ael_graph:show(PeerGr),
@@ -178,6 +176,15 @@ make_graph(Parent, Label) ->
     _ = wxStaticBoxSizer:add(Sizer, GridSizer, zxw:flags(wide)),
     {Sizer, TextCtrl, Graph, ID}.
 
+set_rect(Frame, Args) ->
+    case proplists:get_value(rect, Args, none) of
+        none ->
+            ok = wxFrame:setSize(Frame, {510, 700}),
+            ok = wxFrame:center(Frame);
+        Rect ->
+            wxWindow:setSize(Frame, Rect)
+    end.
+
 
 -spec handle_call(Message, From, State) -> Result
     when Message  :: term(),
@@ -189,9 +196,6 @@ make_graph(Parent, Label) ->
                    | {error, {listening, inet:port_number()}},
          NewState :: state().
 
-handle_call(ask_install, _, State) ->
-    Response = do_ask_install(State),
-    {reply, Response, State};
 handle_call(Unexpected, From, State) ->
     ok = tell(warning, "Unexpected call from ~tp: ~tp~n", [From, Unexpected]),
     {noreply, State}.
@@ -249,12 +253,9 @@ handle_event(#wx{event = #wxPaint{}}, State = #s{graphs = {_, Graphs}}) ->
 handle_event(Event = #wx{event = #wxMouse{}}, State) ->
     NewState = handle_mouse(Event, State),
     {noreply, NewState};
-handle_event(#wx{id = ID, event = #wxCommand{type = command_button_clicked}}, State) ->
-    NewState =
-        case ID of
-            ?NODE       -> run_node(State);
-            ?wxID_EXIT  -> close(State)
-        end,
+handle_event(#wx{id = ?NODE, event = #wxCommand{type = command_button_clicked}},
+             State) ->
+    NewState = run_node(State),
     {noreply, NewState};
 handle_event(#wx{event = #wxClose{}}, State) ->
     NewState = close(State),
@@ -272,7 +273,8 @@ handle_mouse(#wx{id = ID, event = Event}, State = #s{graphs = {GraphIDs, Graphs}
             State
     end.
 
-do_graph_update(Graph, #wxMouse{type = motion, leftDown = true, rightDown = false,
+do_graph_update(Graph, #wxMouse{type = motion,
+                                leftDown = true, rightDown = false,
                                 x = X, y = Y}) ->
     {ok, NewGraph} = ael_graph:traverse(X, Y, Graph),
     NewGraph;
@@ -317,42 +319,17 @@ terminate(Reason, State) ->
 
 %%% Doers
 
-do_ask_install(#s{frame = Frame}) ->
-    Message = build_notice(ael_con:platform()),
-    ask_yes_no(Frame, Message).
-
-ask_yes_no(Frame, Message) ->
-    Text = io_lib:format("~ts", [Message]),
-    Style = {style, ?wxOK bor ?wxCANCEL},
-    Modal = wxMessageDialog:new(Frame, Text, [Style]),
-    Response =
-        case wxMessageDialog:showModal(Modal) of
-            ?wxID_OK     -> ok;
-            ?wxID_CANCEL -> cancel
-        end,
-    ok = wxMessageDialog:destroy(Modal),
-    Response.
-
-build_notice(_) ->
-    "You want to run a node? EXCELLENT!\n\n"
-    "To run a node one must first be built.\n"
-    "Building a node requires a number of packages be available on the host "
-    "system in order for the node to be able to run. "
-    "To ensure that the necessary packages are installed please run the "
-    "following command as root or using the `sudo` command:\n\n"
-    "apt install gcc curl g++ dpkg-dev build-essential\\\n"
-    "    automake autoconf libncurses5-dev libssl-dev\\\n"
-    "    flex xsltproc wget vim git cmake libsodium-dev\\\n"
-    "    libgmp-dev".
-
-
 do_stat({height, Now},
         State = #s{sync = {true, Complete}, height_ct = HeightCt}) ->
     ok = wxTextCtrl:changeValue(HeightCt, sync_format(Now, Complete)),
     State#s{height = Now};
-do_stat({height, Now}, State = #s{sync = false, height_ct = HeightCt}) ->
-    ok = wxTextCtrl:changeValue(HeightCt, integer_to_list(Now)),
+do_stat({height, Now},
+        State = #s{sync = false, height = Now}) ->
     State;
+do_stat({height, Now},
+        State = #s{sync = false, height_ct = HeightCt}) ->
+    ok = wxTextCtrl:changeValue(HeightCt, integer_to_list(Now)),
+    State#s{height = Now};
 do_stat({difficulty, Rating},
         State = #s{diff_ct = DiffCt, graphs = Graphs}) ->
     NewGraphs = update_graph(diff, Graphs, Rating),
@@ -363,9 +340,11 @@ do_stat({sync, Sync = {true, Complete}},
     ok = wxTextCtrl:changeValue(HeightCt, sync_format(Now, Complete)),
     State#s{sync = Sync};
 do_stat({sync, {false, _}},
-        State = #s{height = Now, height_ct = HeightCt}) ->
+        State = #s{sync = {true, _}, height = Now, height_ct = HeightCt}) ->
     ok = wxTextCtrl:changeValue(HeightCt, integer_to_list(Now)),
     State#s{sync = false};
+do_stat({sync, {false, _}}, State = #s{sync = false}) ->
+    State;
 do_stat({peers, {PeerCount, PeerConnI, PeerConnO}},
         State = #s{peer_ct = PeerCt, graphs = Graphs}) ->
     Figures =
@@ -390,7 +369,7 @@ sync_format(Now, Complete) ->
     unicode:characters_to_list(Format).
 
 calc_top(Now, Complete) when Complete > 0 ->
-    trunc((Now * 100) / Complete);
+    ceil((Now * 100) / Complete);
 calc_top(_, _) ->
     0.
 
@@ -446,6 +425,8 @@ run_node(State = #s{conf_pk = ConfPk}) ->
 
 
 close(State = #s{frame = Frame}) ->
-    ok = ael_con:stop_ae(),
+    {X, Y} = wxWindow:getPosition(Frame),
+    {W, H} = wxWindow:getSize(Frame),
+    ok = ael_con:save_rect(?MODULE, {X, Y, W, H}),
     ok = wxFrame:destroy(Frame),
     State.
