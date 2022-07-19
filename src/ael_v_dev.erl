@@ -236,7 +236,7 @@ do_comp(State = #s{frame = Frame, text = Text}) ->
 
 compile(Frame, Code) ->
     ok = tell(info, "Compiling!"),
-    case aeso_compiler:from_string(Code, []) of
+    case aeso_compiler:from_string(Code, [{backend, fate}]) of
         {ok, Out}       -> erlang:display(Out);
         {error, Errors} -> show_comp_errors(Frame, Errors)
     end.
