@@ -70,7 +70,7 @@
 -spec toggle_node(ConfName :: string()) -> ok | running.
 
 toggle_node(ConfName) ->
-    gen_server:call(?MODULE, {toggle_node, ConfName}, 10000).
+    gen_server:call(?MODULE, {toggle_node, ConfName}, 30000).
 
 -spec build() -> ok.
 
@@ -525,9 +525,9 @@ start_node(State = #s{aecore   = {_, AECoreBuild},
                       manifest = Manifest}) ->
     ok = ael_v_node:set_button(stop, true),
     Selected = lists:keyfind(ConfName, #conf_meta.name, Manifest),
-    #conf_meta{path = ConfPath, data = DataPath} = Selected,
+    #conf_meta{path = ConfPath} = Selected,
     true = os:putenv("AETERNITY_CONFIG", ConfPath),
-    ok = maybe_move_files(AECoreBuild, DataPath),
+    ok = maybe_copy_silly_files(AECoreBuild),
     AECore_REL = filename:join(AECoreBuild, "releases/RELEASES"),
     Sophia_REL = filename:join(SophiaBuild, "releases/RELEASES"),
     AECoreDeps = extract_deps(AECore_REL),
@@ -538,6 +538,9 @@ start_node(State = #s{aecore   = {_, AECoreBuild},
     Apps = AECoreApps ++ SophiaApps,
     {ok, Started} = application:ensure_all_started(app_ctrl),
     ok = ael_gui:show(io_lib:format("Prestarted: ~p.~n", [Started])),
+%   FIXME: Sean needed this to run valgrind. Why? Race? Need to sleep here?
+%   AEC_DB = aec_db:start_db(),
+%   ok = tell(info, "AEC_DB: ~p", [AEC_DB]),
     {ok, _} = application:ensure_all_started(aesync),
     ok = ael_monitor:start_poll(1000),
     State#s{node = running, loaded = Apps}.
@@ -546,17 +549,6 @@ extract_deps(REL) ->
     {ok, [[{release, App, _, _, Deps, permanent}]]} = file:consult(REL),
     ok = ael_gui:show(io_lib:format("Preparing dependencies for ~s.~n", [App])),
     Deps.
-
-maybe_move_files(BaseDir, DataPath) ->
-    ok = maybe_copy_silly_files(BaseDir),
-    case filelib:is_dir(DataPath) of
-        true ->
-            ok = ael_gui:show("No need to populate...\n");
-        false ->
-            ok = ael_gui:show("Populating data directory...\n"),
-            ok = run_once_out_of_context(BaseDir),
-            ok = move_delicious_data_bits(BaseDir)
-    end.
 
 maybe_copy_silly_files(BaseDir) ->
     NonsenseThatShouldBeOptional = ["REVISION", "VERSION"],
@@ -574,35 +566,6 @@ maybe_copy_silly_files(BaseDir) ->
             end
         end,
     lists:foreach(Copy, NonsenseThatShouldBeOptional).
-
-run_once_out_of_context(BaseDir) ->
-    AE = filename:join(BaseDir, "bin/aeternity"),
-    Command = AE ++ " foreground",
-    Tron = spawn_link(fun() -> stop_the_madness(AE) end),
-    _ = erlang:send_after(15000, Tron, redrum),
-    ael_os:cmd(Command).
-
-stop_the_madness(AE) ->
-    receive redrum -> os:cmd(AE ++ " stop") end.
-
-move_delicious_data_bits(BaseDir) ->
-    Var = var(),
-    Files = filelib:wildcard("data/**", BaseDir),
-    Srcs = [filename:join(BaseDir, F) || F <- Files],
-    Dsts = [filename:join(Var, F) || F <- Files],
-    lists:foreach(fun relocate/1, lists:zip(Srcs, Dsts)).
-
-relocate({Src, Dst}) ->
-    ok = filelib:ensure_dir(Dst),
-    case filelib:is_dir(Src) of
-        false ->
-            {ok, _} = file:copy(Src, Dst),
-            ael_gui:show(io_lib:format("Moved ~s to ~s~n", [Src, Dst]));
-        true ->
-            Message = io_lib:format("Making dir ~s~n", [Dst]),
-            ael_gui:show(Message),
-            ok = file:make_dir(Dst)
-    end.
 
 add_libs(BaseDir, Deps) ->
     ok = file:set_cwd(var()),
