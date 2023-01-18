@@ -17,11 +17,11 @@
 -license("ISC").
 
 -define(sophia_ver, {6, 1, 0}).
--define(aecore_ver, {6, 6, 0}).
+-define(aecore_ver, {6, 7, 0}).
 -define(sophia_url,
         "https://github.com/aeternity/aesophia/archive/refs/tags/v6.1.0.tar.gz").
 -define(ae_core_url,
-        "https://github.com/aeternity/aeternity/archive/refs/tags/v6.6.0.tar.gz").
+        "https://github.com/aeternity/aeternity/archive/refs/tags/v6.7.0.tar.gz").
 
 -export([start_link/1, aecore_ok/1, sophia_ok/1]).
 -include("$zx_include/zx_logger.hrl").

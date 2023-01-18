@@ -67,10 +67,10 @@
 
 %%% Interface
 
--spec toggle_node(ConfName :: string()) -> ok | running.
+-spec toggle_node(ConfName :: string()) -> ok.
 
 toggle_node(ConfName) ->
-    gen_server:call(?MODULE, {toggle_node, ConfName}, 30000).
+    gen_server:cast(?MODULE, {toggle_node, ConfName}).
 
 -spec build() -> ok.
 
@@ -227,9 +227,6 @@ generate_manifest(ManifestPath) ->
 
 %%% gen_server Message Handling Callbacks
 
-handle_call({toggle_node, ConfName}, _, State) ->
-    {Response, NewState} = do_toggle_node(State, ConfName),
-    {reply, Response, NewState};
 handle_call({read_conf, Name}, _, State) ->
     Response = do_read_conf(Name, State),
     {reply, Response, State};
@@ -263,6 +260,9 @@ handle_cast({build_complete, Builder, Meta}, State) ->
     {noreply, NewState};
 handle_cast(build_cancelled, State) ->
     NewState = do_build_cancelled(State),
+    {noreply, NewState};
+handle_cast({toggle_node, ConfName}, State) ->
+    NewState = do_toggle_node(State, ConfName),
     {noreply, NewState};
 handle_cast(stop, State) ->
     ok = log(info, "Received a 'stop' message."),
@@ -435,17 +435,23 @@ write_conf({#conf_meta{path = Path}, Conf}) ->
 
 
 do_toggle_node(State = #s{node = none}, ConfName) ->
+    ok = ael_v_node:set_button(run, false),
     NewState = start_node(State#s{conf = ConfName}),
-    {ok, NewState};
+    ok = ael_v_node:set_button(stop, true),
+    NewState;
 do_toggle_node(State = #s{node = stopped}, ConfName) ->
+    ok = ael_v_node:set_button(run, false),
+    ok = ael_v_node:clear_display(),
     NewState = start_node(State#s{conf = ConfName}),
-    {ok, NewState};
+    ok = ael_v_node:set_button(stop, true),
+    NewState;
 do_toggle_node(State = #s{node = running}, _) ->
+    ok = ael_v_node:set_button(stop, false),
     NewState = stop_ae(State),
     ok = ael_v_node:set_button(run, true),
-    {running, NewState};
+    NewState;
 do_toggle_node(State = #s{node = {building, _}}, _) ->
-    {ok, State}.
+    State.
 
 
 stop_ae(State = #s{node = running, loaded = Apps}) ->
@@ -472,6 +478,11 @@ stop_ae(State = #s{node = running, loaded = Apps}) ->
     AppsInOrder = DoFirst ++ ToRemove ++ DoLast,
     ok = lists:foreach(fun remove/1, AppsInOrder),
     ok = net_kernel:stop(),
+    ok =
+        case persistent_term:erase({aec_consensus, genesis_hash}) of
+            true  -> tell("Genesis hash removed.");
+            false -> tell("No genesis hash to remove.")
+        end,
     State#s{node = stopped, loaded = []};
 stop_ae(State) ->
     State.
@@ -523,7 +534,6 @@ start_node(State = #s{aecore   = {_, AECoreBuild},
                       sophia   = {_, SophiaBuild},
                       conf     = ConfName,
                       manifest = Manifest}) ->
-    ok = ael_v_node:set_button(stop, true),
     Selected = lists:keyfind(ConfName, #conf_meta.name, Manifest),
     #conf_meta{path = ConfPath} = Selected,
     true = os:putenv("AETERNITY_CONFIG", ConfPath),

@@ -18,7 +18,7 @@
 -behavior(ael_view).
 -behavior(wx_object).
 -include_lib("wx/include/wx.hrl").
--export([set_button/2, set_manifest/1, stat/1]).
+-export([set_button/2, clear_display/0, set_manifest/1, stat/1]).
 -export([start_link/1, to_front/1]).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2,
@@ -60,6 +60,12 @@ to_front(Win) ->
 
 set_button(Mode, Enabled) ->
     cast({set_button, Mode, Enabled}).
+
+
+-spec clear_display() -> ok.
+
+clear_display() ->
+    cast(clear_display).
 
 
 -spec set_manifest(Entries) -> ok
@@ -215,6 +221,9 @@ handle_cast({stat, Elements}, State) ->
 handle_cast({set_button, Mode, Enabled}, State) ->
     ok = do_set_button(Mode, Enabled, State),
     {noreply, State};
+handle_cast(clear_display, State) ->
+    NewState = do_clear_display(State),
+    {noreply, NewState};
 handle_cast({set_manifest, Names}, State) ->
     ok = do_set_manifest(Names, State),
     {noreply, State};
@@ -400,10 +409,24 @@ do_set_button(Mode, Enabled, #s{node_bn = NodeBn, conf_pk = ConfPk}) ->
     ok.
 
 
+do_clear_display(State = #s{height_ct = HeightCt,
+                            peer_ct   = PeerCt,
+                            diff_ct   = DiffCt,
+                            txpool_ct = PoolCt,
+                            graphs = {IDs, Graphs}}) ->
+    Clear =
+        fun(_, G) ->
+            {ok, NewG} = ael_graph:clear(G),
+            NewG
+        end,
+    Cleared = maps:map(Clear, Graphs),
+    Blank = fun(T) -> wxTextCtrl:changeValue(T, "") end,
+    ok = lists:foreach(Blank, [HeightCt, PeerCt, DiffCt, PoolCt]),
+    State#s{graphs = {IDs, Cleared}}.
+
+
 do_set_manifest(Names, #s{conf_pk = ConfPk}) ->
-    tell(info, "ConfPk: ~p", [ConfPk]),
     Selected = wxChoice:getStringSelection(ConfPk),
-    tell(info, "Selected: ~p", [Selected]),
     LastIndex = length(Names) - 1,
     ok = wxChoice:clear(ConfPk),
     LastIndex = wxChoice:insertStrings(ConfPk, Names, 0),
@@ -418,10 +441,8 @@ do_set_manifest(Names, #s{conf_pk = ConfPk}) ->
 
 run_node(State = #s{conf_pk = ConfPk}) ->
     Selected = wxChoice:getStringSelection(ConfPk),
-    case ael_con:toggle_node(Selected) of
-        ok      -> State;
-        running -> State
-    end.
+    ok = ael_con:toggle_node(Selected),
+    State.
 
 
 close(State = #s{frame = Frame}) ->

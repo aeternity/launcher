@@ -177,7 +177,7 @@ add_entry(Entry = {_, Value},
          NewGraph :: graph().
 
 clear(Graph) ->
-    NewGraph = Graph#g{history = #h{}, tx = 0.0, ty = -1.0, rx = 0.0, ry = 0.0},
+    NewGraph = Graph#g{history = #h{}, tx = 0.0, ty = -0.9, rx = 0.0, ry = 0.0},
     render(NewGraph).
 
 
