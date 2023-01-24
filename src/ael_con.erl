@@ -537,7 +537,7 @@ start_node(State = #s{aecore   = {_, AECoreBuild},
     Selected = lists:keyfind(ConfName, #conf_meta.name, Manifest),
     #conf_meta{path = ConfPath} = Selected,
     true = os:putenv("AETERNITY_CONFIG", ConfPath),
-    ok = maybe_copy_silly_files(AECoreBuild),
+    ok = maybe_copy_silly_files(AECoreBuild, ConfPath),
     AECore_REL = filename:join(AECoreBuild, "releases/RELEASES"),
     Sophia_REL = filename:join(SophiaBuild, "releases/RELEASES"),
     AECoreDeps = extract_deps(AECore_REL),
@@ -548,9 +548,6 @@ start_node(State = #s{aecore   = {_, AECoreBuild},
     Apps = AECoreApps ++ SophiaApps,
     {ok, Started} = application:ensure_all_started(app_ctrl),
     ok = ael_gui:show(io_lib:format("Prestarted: ~p.~n", [Started])),
-%   FIXME: Sean needed this to run valgrind. Why? Race? Need to sleep here?
-%   AEC_DB = aec_db:start_db(),
-%   ok = tell(info, "AEC_DB: ~p", [AEC_DB]),
     {ok, _} = application:ensure_all_started(aesync),
     ok = ael_monitor:start_poll(1000),
     State#s{node = running, loaded = Apps}.
@@ -560,7 +557,7 @@ extract_deps(REL) ->
     ok = ael_gui:show(io_lib:format("Preparing dependencies for ~s.~n", [App])),
     Deps.
 
-maybe_copy_silly_files(BaseDir) ->
+maybe_copy_silly_files(BaseDir, ConfPath) ->
     NonsenseThatShouldBeOptional = ["REVISION", "VERSION"],
     AE_Home = var(),
     Copy =
@@ -575,7 +572,31 @@ maybe_copy_silly_files(BaseDir) ->
                     ok
             end
         end,
-    lists:foreach(Copy, NonsenseThatShouldBeOptional).
+    ok = lists:foreach(Copy, NonsenseThatShouldBeOptional),
+    {ok, Bin} = file:read_file(ConfPath),
+    #{"chain" := #{"db_path" := DBPath}} = zj:decode(Bin),
+    AECore = filename:join(DBPath, "aecore"),
+    case filelib:is_dir(AECore) of
+        true  -> ok;
+        false -> copy_aecore(BaseDir, DBPath)
+    end.
+
+copy_aecore(BaseDir, DBPath) ->
+    Src = filename:join(BaseDir, "data/aecore"),
+    Dst = filename:join(DBPath, "aecore"),
+    cp_r(Src, Dst).
+
+cp_r(Src, Dst) ->
+    case filelib:is_regular(Src) of
+        true ->
+            {ok, _} = file:copy(Src, Dst),
+            ok;
+        false ->
+            case filelib:is_dir(Dst) of
+                false ->
+                    ok = file:make_dir(Dst),
+                    {ok, Entries} = file:list_dir(Src),
+
 
 add_libs(BaseDir, Deps) ->
     ok = file:set_cwd(var()),
@@ -588,13 +609,7 @@ load_apps(Paths) ->
     erlang:display(Paths),
     {ok, [Config]} = file:consult(filename:join(zx:get_home(), "priv/sys.config")),
     ok = application:set_env(Config),
-    INetsLaunchString =
-        case net_kernel:start(['aeternity@localhost', longnames]) of
-            {ok, PID} ->
-                io_lib:format("inets started at ~p.~n", [PID]);
-            {error, {already_started, PID}} ->
-                io_lib:format("Using existing inets at ~p.~n", [PID])
-        end,
+    INetsLaunchString = start_net_kernel(),
     ok = ael_gui:show(INetsLaunchString),
     Loaded = [element(1, A) || A <- application:loaded_applications()],
     Load =
@@ -617,6 +632,33 @@ load_apps(Paths) ->
         end,
     lists:foldl(Load, [], Paths).
 
+% NOTE: The final clause below is somewhat excessive but funny.
+start_net_kernel() ->
+    case net_kernel:start(['aeternity@localhost', longnames]) of
+        {ok, PID} ->
+            io_lib:format("inets started at ~p.~n", [PID]);
+        {error, {already_started, PID}} ->
+            io_lib:format("Using existing inets at ~p.~n", [PID]);
+        {error,
+         {{shutdown,
+           {failed_to_start_child,
+            net_kernel,
+            {'EXIT', nodistribution}}},
+          {child,
+           undefined,
+           net_sup_dynamic,
+           {erl_distribution,
+            start_link,
+            [[aeternity@localhost, longnames], false, net_sup_dynamic]},
+           permanent,
+           false,
+           1000,
+           supervisor,
+           [erl_distribution]}}} ->
+            ok = tell(info, "Trying silliness..."),
+            "" = os:cmd("epmd -daemon"),
+            start_net_kernel()
+    end.
 
 
 %%% Platform Identification
