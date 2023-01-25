@@ -53,10 +53,11 @@
                                 W :: integer(), H :: integer()}}).
 
 -type state()     :: #s{}.
--type ui_name()   :: ael_v_conf
+-type ui_name()   :: ael_v_wallet
                    | ael_v_node
-                   | ael_v_chain
                    | ael_v_dev
+                   | ael_v_conf
+                   | ael_v_chain
                    | ael_v_network
                    | ael_v_mempool
                    | {ael_v_conf_editor, Name :: string() | new}.
@@ -574,7 +575,7 @@ maybe_copy_silly_files(BaseDir, ConfPath) ->
         end,
     ok = lists:foreach(Copy, NonsenseThatShouldBeOptional),
     {ok, Bin} = file:read_file(ConfPath),
-    #{"chain" := #{"db_path" := DBPath}} = zj:decode(Bin),
+    {ok, #{"chain" := #{"db_path" := DBPath}}} = zj:decode(Bin),
     AECore = filename:join(DBPath, "aecore"),
     case filelib:is_dir(AECore) of
         true  -> ok;
@@ -587,15 +588,63 @@ copy_aecore(BaseDir, DBPath) ->
     cp_r(Src, Dst).
 
 cp_r(Src, Dst) ->
-    case filelib:is_regular(Src) of
-        true ->
+    SrcType = file_type(Src),
+    DstType = file_type(Dst),
+    case {SrcType, DstType} of
+        {file, file} ->
             {ok, _} = file:copy(Src, Dst),
+            {ok, Info} = file:read_file_info(Src),
+            Mode = element(8, Info),
+            ok = file:change_mode(Dst, Mode),
             ok;
+        {file, none} ->
+            {ok, _} = file:copy(Src, Dst),
+            {ok, Info} = file:read_file_info(Src),
+            Mode = element(8, Info),
+            ok = file:change_mode(Dst, Mode),
+            ok;
+        {dir,  dir} ->
+            {ok, Entries} = file:list_dir(Src),
+            {ok, Info} = file:read_file_info(Src),
+            Mode = element(8, Info),
+            ok = file:change_mode(Dst, Mode),
+            cp_r(Entries, Src, Dst);
+        {dir,  none} ->
+            ok = filelib:ensure_dir(Dst),
+            ok = file:make_dir(Dst),
+            {ok, Info} = file:read_file_info(Src),
+            Mode = element(8, Info),
+            ok = file:change_mode(Dst, Mode),
+            {ok, Entries} = file:list_dir(Src),
+            cp_r(Entries, Src, Dst);
+        {file, dir} ->
+            ok = io:format("~p is a file and ~p is a directory!~n", [Src, Dst]),
+            exit(1);
+        {dir,  file} ->
+            ok = io:format("~p is a directory and ~p is a file!~n", [Src, Dst]),
+            exit(1);
+        {none, _} ->
+            ok = io:format("~p doesn't exist!~n", [Src]),
+            exit(1)
+    end.
+
+cp_r([Entry | Entries], Src, Dst) ->
+    ok = cp_r(filename:join(Src, Entry), filename:join(Dst, Entry)),
+    cp_r(Entries, Src, Dst);
+cp_r([], _, _) ->
+    ok.
+
+
+file_type(Path) ->
+    case filelib:is_regular(Path) of
+        true ->
+            file;
         false ->
-            case filelib:is_dir(Dst) of
-                false ->
-                    ok = file:make_dir(Dst),
-                    {ok, Entries} = file:list_dir(Src),
+            case filelib:is_dir(Path) of
+                true  -> dir;
+                false -> none
+            end
+    end.
 
 
 add_libs(BaseDir, Deps) ->
@@ -606,7 +655,6 @@ add_libs(BaseDir, Deps) ->
     load_apps(Paths).
 
 load_apps(Paths) ->
-    erlang:display(Paths),
     {ok, [Config]} = file:consult(filename:join(zx:get_home(), "priv/sys.config")),
     ok = application:set_env(Config),
     INetsLaunchString = start_net_kernel(),

@@ -126,9 +126,10 @@ init({BuildERTS, AECore, Sophia, Platform = {{OS, Version}, OTP, ERTS}}) ->
     ButtonConf =
         case AEcoreOK =:= true andalso SophiaOK =:= true andalso SameERTS of
             true ->
-                [{"Configurator",        ael_v_conf},
+                [{"Wallet",              ael_v_wallet},
                  {"Run Local Node",      ael_v_node},
                  {"Developer Workbench", ael_v_dev},
+                 {"Configurator",        ael_v_conf},
                  {"Chain Explorer",      ael_v_chain},
                  {"Network Explorer",    ael_v_network},
                  {"Mempool Explorer",    ael_v_mempool}];
