@@ -42,7 +42,6 @@ start_link(Args) ->
 
 
 init(Args) ->
-    erlang:display(Args),
     Title = "ÆL Chain Explorer",
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, Title),
@@ -54,9 +53,16 @@ init(Args) ->
 
     ok = wxFrame:connect(Frame, close_window),
     ok = wxFrame:center(Frame),
+    ok = set_rect(Frame, Args),
     true = wxFrame:show(Frame),
     State = #s{frame = Frame, text = TextC},
     {Frame, State}.
+
+set_rect(Frame, Args) ->
+    case proplists:get_value(rect, Args, none) of
+        none -> wxFrame:center(Frame);
+        Rect -> wxWindow:setSize(Frame, Rect)
+    end.
 
 
 handle_call(Unexpected, From, State) ->
@@ -80,9 +86,9 @@ handle_info(Unexpected, State) ->
     {noreply, State}.
 
 
-handle_event(#wx{event = #wxClose{}}, State = #s{frame = Frame}) ->
-    ok = wxWindow:destroy(Frame),
-    {noreply, State};
+handle_event(#wx{event = #wxClose{}}, State) ->
+    NewState = close(State),
+    {noreply, NewState};
 handle_event(Event, State) ->
     ok = log(info, "Unexpected event ~tp State: ~tp~n", [Event, State]),
     {noreply, State}.
@@ -100,3 +106,11 @@ terminate(Reason, State) ->
 do_show(Terms, #s{text = TextC}) ->
     String = io_lib:format("Received args: ~tp", [Terms]),
     wxTextCtrl:changeValue(TextC, String).
+
+
+close(State = #s{frame = Frame}) ->
+    {X, Y} = wxWindow:getPosition(Frame),
+    {W, H} = wxWindow:getSize(Frame),
+    ok = ael_con:save_rect(?MODULE, {X, Y, W, H}),
+    ok = wxWindow:destroy(Frame),
+    State.
