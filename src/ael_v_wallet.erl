@@ -25,7 +25,9 @@
          text  = none :: none | wx:wx_object()}).
 
 
-% -type state() :: term().
+-define(keyCREATE, 11).
+-define(keyREVIVE, 12).
+-define(keyDELETE, 13).
 
 
 %%% Interface
@@ -42,14 +44,31 @@ start_link(Args) ->
 
 
 init(Args) ->
+    io:format("wxID_LOWEST: ~w wxID_HIGHEST: ~w~n", [?wxID_LOWEST, ?wxID_HIGHEST]),
     Title = "ÆL Chain Explorer",
     Wx = wx:new(),
     Frame = wxFrame:new(Wx, ?wxID_ANY, Title),
     MainSz = wxBoxSizer:new(?wxVERTICAL),
-    TextC = wxTextCtrl:new(Frame, ?wxID_ANY, [{style, ?wxDEFAULT bor ?wxTE_MULTILINE}]),
-    wxSizer:add(MainSz, TextC, [{flag, ?wxEXPAND}, {proportion, 1}]),
-    wxFrame:setSizer(Frame, MainSz),
-    wxSizer:layout(MainSz),
+
+    StatOpts = [{style, ?wxTE_CENTRE}],
+    KeyBx = wxStaticBox:new(Frame, ?wxID_ANY, "Active Key"),
+    KeySz = wxStaticBoxSizer:new(KeyBx, ?wxHORIZONTAL),
+    Key   = wxStaticText:new(KeyBx, ?wxID_ANY, "", StatOpts),
+    _ = wxStaticBoxSizer:add(KeySz, Key, [{flag, ?wxEXPAND}, {proportion, 1}]),
+    ButtSz = wxBoxSizer:new(?wxHORIZONTAL),
+    CreateBn = wxButton:new(Frame, ?wxID_ANY, [{label, "Create New Key"}]),
+    ReviveBn = wxButton:new(Frame, ?wxID_ANY, [{label, "Recover Key"}]),
+    DeleteBn = wxButton:new(Frame, ?wxID_ANY, [{label, "Delete Key"}]),
+    _ = wxSizer:add(ButtSz, CreateBn, [{flag, ?wxEXPAND}, {proportion, 1}]),
+    _ = wxSizer:add(ButtSz, ReviveBn, [{flag, ?wxEXPAND}, {proportion, 1}]),
+    _ = wxSizer:add(ButtSz, DeleteBn, [{flag, ?wxEXPAND}, {proportion, 1}]),
+
+    TreeC = wxTreeCtrl:new(Frame),
+    _ = wxSizer:add(MainSz, KeySz, [{flag, ?wxEXPAND}, {proportion, 0}]),
+    _ = wxSizer:add(MainSz, ButtSz, [{flag, ?wxEXPAND}, {proportion, 0}]),
+    _ = wxSizer:add(MainSz, TreeC, [{flag, ?wxEXPAND}, {proportion, 1}]),
+    ok = wxFrame:setSizer(Frame, MainSz),
+    ok = wxSizer:layout(MainSz),
 
     ok = wxFrame:connect(Frame, close_window),
     ok = wxFrame:center(Frame),
