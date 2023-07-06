@@ -296,7 +296,7 @@ build_notice(debian) ->
     "apt install gcc curl g++ dpkg-dev build-essential\\\n"
     "    automake autoconf libncurses5-dev libssl-dev\\\n"
     "    flex xsltproc wget vim git cmake libsodium-dev\\\n"
-    "    libgmp-dev\n\n"
+    "    libgmp-dev libtool\n\n"
     "After installing the required packages, press 'OK' below.";
 build_notice(linux) ->
     "Building a node requires a number of packages be available on the host "
